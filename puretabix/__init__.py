@@ -69,7 +69,7 @@ class TabixIndex:
             # 0 = generic tab-delemited
             # 1 = SAM
             # 2 = VCF
-            if self.file_format in (0, 1, 2):
+            if self.file_format not in (0, 1, 2):
                 raise RuntimeError(f"invalid tabix index format {self.file_format}.")
 
             # these are 1 based
