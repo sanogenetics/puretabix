@@ -1,8 +1,8 @@
 from setuptools import setup
 
 setup(
-    name="Pure Tabix",
-    version="1.0.0",
+    name="puretabix",
+    version="1.0.1",
     author="Adam Faulconbridge",
     author_email="afaulconbridge@googlemail.com",
     packages=["puretabix"],
