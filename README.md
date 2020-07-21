@@ -2,6 +2,7 @@ Pure Tabix
 ==========
 
 [![Build Status](https://travis-ci.com/afaulconbridge/puretabix.svg?branch=master)](https://travis-ci.com/afaulconbridge/puretabix)
+[![Build Status](https://circleci.com/gh/afaulconbridge/puretabix.svg?style=svg)](https://app.circleci.com/pipelines/github/afaulconbridge/puretabix)
 [![PyPI version](https://badge.fury.io/py/puretabix.svg)](https://badge.fury.io/py/puretabix)
 
 This is a pure-python Tabix index parser. Useful as an alternative to [PySAM](https://pypi.org/project/pysam) and [PyTabix](https://pypi.org/project/pytabix)
