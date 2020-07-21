@@ -9,7 +9,7 @@ setup(
     description="Pure python implementation Tabix reader.",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/afaulconbridge/puretabix",
+    url="https://github.com/sanogenetics/puretabix",
     install_requires=[],
     extras_require={
         "dev": [
