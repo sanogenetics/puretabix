@@ -178,7 +178,27 @@ class TabixIndexedFile:
     def __init__(self, fileobj, index_fileobj):
         self.index = TabixIndex(index_fileobj)
         self.fileobj = fileobj
-        # TODO check fileobject is a real block-gzipped file
+        # check fileobject is a real block-gzipped file
+        if not self.is_block_gzip():
+            raise ValueError("fileobj must be a block gzipped file-like object")
+
+    def is_gzip(self):
+        """is bytes_data a valid gzip file?"""
+        self.fileobj.seek(0)
+        bytes_data = self.fileobj.read(3)
+        header = struct.unpack("<BBB", bytes_data)
+        return header[0] == 31 and header[1] == 139 and header[2] == 8
+
+    def is_block_gzip(self):
+        """is bytes_data is a valid block gzip file?"""
+        if not self.is_gzip():
+            return False
+        # NOTE assumes there is only one extra header
+        # not sure if this is required by block gzip spec or not
+        self.fileobj.seek(12)
+        bytes_data = self.fileobj.read(4)
+        header = struct.unpack("<ccH", bytes_data)
+        return header[0] == b"B" and header[1] == b"C" and header[2] == 2
 
     def fetch(self, name, start, end=None):
         """
