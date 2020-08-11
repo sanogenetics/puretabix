@@ -159,6 +159,7 @@ class TabixIndex:
             sequence_name, start, end
         ):
             if chunk_end <= linear_start:
+                #    continue
                 raise RuntimeError(
                     f"invalid chunk passed, ends at {chunk_end} before linear index start {linear_start}"
                 )
@@ -170,6 +171,9 @@ class TabixIndex:
 
             if virtual_end is None or chunk_end > virtual_end:
                 virtual_end = chunk_end
+
+        # either both or neither must be set
+        assert (virtual_start is None) == (virtual_end is None)
 
         return virtual_start, virtual_end
 
@@ -214,6 +218,10 @@ class TabixIndexedFile:
 
         # use the index to get "virtual" file offsets that include all of the region of interest
         virtual_start, virtual_end = self.index.lookup_virtual(name, start, end)
+
+        # location not indexed, return empty string
+        if not virtual_start and not virtual_end:
+            return ""
 
         # the lower 16 bits store the offset of the byte inside the gzip block
         # the rest store the offset of gzip block
