@@ -159,10 +159,10 @@ class TabixIndex:
             sequence_name, start, end
         ):
             if chunk_end <= linear_start:
-                #    continue
-                raise RuntimeError(
-                    f"invalid chunk passed, ends at {chunk_end} before linear index start {linear_start}"
-                )
+                # if the chunk finished before this section of the linear starts, skip the chunk
+                # rare, but does happen sometimes
+                continue
+
             # move the chunk start to where the linear start begins
             chunk_start = min(chunk_start, linear_start)
 
