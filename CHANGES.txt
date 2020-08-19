@@ -1,3 +1,4 @@
+1.0.3, 2020/08/19 -- Fix attempting to access beyond linear index
 1.0.2, 2020/08/17 -- Fix index corner case bugs
 1.0.1, 2020/07/21 -- Fix release packaging
 1.0.0, 2020/07/21 -- Initial release.
