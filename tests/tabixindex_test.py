@@ -41,8 +41,10 @@ class TestBasic:
 
     def test_beyond_end(self, vcf, vcf_tbi):
         indexed = puretabix.TabixIndexedFile(vcf, vcf_tbi)
-
         fetched = indexed.fetch("1", 245804116 + 1)
+        assert fetched == "", fetched
+
+        fetched = indexed.fetch("1", 245804116 * 2)
         assert fetched == "", fetched
 
     def test_before_first(self, vcf, vcf_tbi):

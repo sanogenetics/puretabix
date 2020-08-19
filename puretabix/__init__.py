@@ -137,7 +137,15 @@ class TabixIndex:
         # linear index is in 16kb intervals
         # 16kb = 16 * (2 ** 10) = 2 ** 14 = 1 << 14
         # throw away the first 14 bits to get index position
-        return self.index_interval[sequence_name][start >> 14]
+        i = start >> 14
+        # if this sequence_name isn't valid, say that
+        if sequence_name not in self.index_interval:
+            return None
+        # if it would be beyond the index, say that
+        if i >= len(self.index_interval[sequence_name]):
+            return None
+        # its a valid sequnce name and a valid interval window
+        return self.index_interval[sequence_name][i]
 
     def _lookup_bin_chunks(self, sequence_name, start, end):
         """
@@ -155,6 +163,10 @@ class TabixIndex:
         virtual_end = None
 
         linear_start = self._lookup_linear(sequence_name, start)
+        # if this is not in the linear index, cant return anything
+        if not linear_start:
+            return None, None
+
         for chunk_start, chunk_end in self._lookup_bin_chunks(
             sequence_name, start, end
         ):
