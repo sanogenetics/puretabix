@@ -41,7 +41,9 @@ pipdeptree  # Print dependencies
 Global git ignores per https://help.github.com/en/github/using-git/ignoring-files#configuring-ignored-files-for-all-repositories-on-your-computer
 
 For release to PyPI see https://packaging.python.org/tutorials/packaging-projects/
-
+```sh
+python3 setup.py sdist && python3 -m twine upload dist/*
+```
 
 acknowledgements
 ----------------
