@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="puretabix",
-    version="1.0.3",
+    version="1.0.4-dev",
     author="Adam Faulconbridge",
     author_email="afaulconbridge@googlemail.com",
     packages=["puretabix"],
@@ -20,6 +20,7 @@ setup(
             "pip-tools",
             "pipdeptree",
             "pre-commit",
+            "twine",
         ],
     },
 )
