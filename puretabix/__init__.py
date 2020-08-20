@@ -249,8 +249,7 @@ class TabixIndexedFile:
                 offset_end = virtual_end & 0xFFFF
 
             # read this block
-            block_size = self._get_block_size_compressed(block_start)
-            block = self._read_block(block_start, block_size)
+            block, block_size = self._read_block(block_start)
 
             # take the content of interest out of the block
             if offset_end is None:
@@ -308,23 +307,16 @@ class TabixIndexedFile:
         # return the lines as a text block
         return "".join(lines)
 
-    def _get_block_size_compressed(self, offset):
-        # read the first few bytes of the block from the source
-        # TODO validate this block
-        self.fileobj.seek(offset + 16)
-        block_header = self.fileobj.read(2)
-        assert len(block_header) <= 2, len(block_header)
-        if len(block_header) == 0:
-            # block not in file
-            raise RuntimeError(f"Unable to read size of block at {offset}")
-        block_size_compressed = struct.unpack("<H", block_header)[0] + 1
-        return block_size_compressed
-
-    def _read_block(self, offset, size):
+    def _read_block(self, offset):
         # move the underlying file-like object to the right place
         self.fileobj.seek(offset)
-        # read the appropriate amount of content
-        compressed_bytes = self.fileobj.read(size)
+        # read the first few bytes of the block from the source
+        # TODO validate this block
+        block_header = self.fileobj.read(18)
+        size = struct.unpack("<H", block_header[16:18])[0] + 1
+
+        # read the appropriate amount of content, excluding what has already been read
+        compressed_bytes = block_header + self.fileobj.read(size - 18)
         if len(compressed_bytes) != size:
             raise RuntimeError(
                 f"Unexpected number of bytes read. Got {len(compressed_bytes)}, expected {size}"
@@ -342,4 +334,4 @@ class TabixIndexedFile:
                 f"Had unused data after decompressing of {len(decompressor.unused_data)}"
             )
 
-        return uncompressed_bytes
+        return uncompressed_bytes, size
