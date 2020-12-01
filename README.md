@@ -36,6 +36,7 @@ pytest  # Run tests
 coverage run --source=puretabix -m pytest && coverage report -m  # Run tests, print coverage
 mypy .  # Type checking
 pipdeptree  # Print dependencies
+scalene --outfile tests/perf_test_.txt --profile-all --cpu-sampling-rate 0.0001 tests/perf_test.py  # performance measurements
 ```
 
 Global git ignores per https://help.github.com/en/github/using-git/ignoring-files#configuring-ignored-files-for-all-repositories-on-your-computer

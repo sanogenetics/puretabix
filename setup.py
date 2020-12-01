@@ -21,6 +21,7 @@ setup(
             "pipdeptree",
             "pre-commit",
             "twine",
+            "scalene",
         ],
     },
 )
