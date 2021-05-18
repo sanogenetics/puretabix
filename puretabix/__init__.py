@@ -1,4 +1,5 @@
 from .bgzip import (  # noqa: disable=F401
+    BlockGZipWriter,
     get_bgzip_lines_parallel,
     get_bgzip_lines_ranged,
 )

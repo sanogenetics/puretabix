@@ -1,4 +1,7 @@
-from puretabix import get_bgzip_lines_parallel
+import os.path
+import tempfile
+
+from puretabix import BlockGZipWriter, get_bgzip_lines_parallel
 
 
 class TestBlockGZip:
@@ -11,3 +14,19 @@ class TestBlockGZip:
             line_in = line_in.strip()
             line_out = str(line_out)
             assert line_in == line_out, (line_in, line_out)
+
+    def test_write_bgzip(self, vcf_gz):
+        lines = tuple(sorted(map(bytes.decode, vcf_gz.readlines())))
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bgzfilename = os.path.join(tmpdir, "out.bzg")
+            with BlockGZipWriter(open(bgzfilename, "wb")) as bgzipwriter:
+                for line in lines:
+                    bgzipwriter.write(line.encode())
+
+            lines_parsed = tuple(sorted(get_bgzip_lines_parallel(bgzfilename)))
+
+            for line_in, line_out in zip(lines, lines_parsed):
+                print(line_in, line_out)
+                line_in = line_in.strip()
+                line_out = str(line_out)
+                assert line_in == line_out, (line_in, line_out)

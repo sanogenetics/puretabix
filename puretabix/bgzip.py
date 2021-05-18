@@ -1,4 +1,6 @@
 import collections
+import errno
+import io
 import itertools
 import logging
 import os
@@ -13,9 +15,13 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+headerpattern = "<BBBBIBBHBBHH"
+headersize = struct.calcsize(headerpattern)
+tailpattern = "<II"
+tailsize = struct.calcsize(tailpattern)
 
-# jump into the middle of a file and try to scan to the first block
-def check_bytes_header(header: bytes):
+
+def check_is_header(header: bytes):
     if header[0] != 31:
         return False
     if header[1] != 139:
@@ -33,90 +39,89 @@ def check_bytes_header(header: bytes):
     return True
 
 
-def _ranged_scan_and_read(infile, start, end, buffer=collections.deque()):
+def get_cdata(header, infile):
+    blocksize = header[11] - header[7] - 19
+    cdata = infile.read(blocksize)
+    assert len(cdata) == blocksize, f"Unable to read up to {blocksize} of cdata"
+    return cdata
+
+
+def get_tail(infile, decompressed=None):
+    # read isize and crc check
+    tailbytes = infile.read(tailsize)
+    if len(tailbytes) != tailsize:
+        raise ValueError(f"Unable to read {tailsize} bytes for tail")
+    tail_crc, tail_isize = struct.unpack(tailpattern, tailbytes)
+    # if we were given the decompressed data, check it matches expectation
+    if decompressed:
+        # check decompressed size is expected
+        assert len(decompressed) == tail_isize
+        # check crc check is expected
+        assert zlib.crc32(decompressed) == tail_crc
+    return tail_crc, tail_isize
+
+
+def get_cdata_decompressed(header, infile):
+    cdata = get_cdata(header, infile)
+    # now do the actual decompression
+    decompressor = zlib.decompressobj(
+        wbits=-15
+    )  # we've alread read the header, so ignore it
+    decompressed = decompressor.decompress(cdata)
+    assert (
+        not decompressor.unconsumed_tail
+    ), f"unconsumed tail of {len(decompressor.unconsumed_tail)}"
+    assert (
+        not decompressor.unused_data
+    ), f"unused data present of {len(decompressor.unused_data)}"
+    return cdata, decompressed
+
+
+# jump into the middle of a file and try to scan to the first block
+def _ranged_scan_and_read(infile, start, end):
     assert start < end, "must span at least one byte!"
 
     infile.seek(start, os.SEEK_SET)
 
     # read the bgzip header
     # see https://samtools.github.io/hts-specs/SAMv1.pdf
-    pattern = "<BBBBIBBHBBHH"
-    patternsize = struct.calcsize(pattern)
     got_content = False
-    block_start = start - len(buffer)
-    while block_start < end:
-        block_start_next = block_start
+    buffer = collections.deque()
+    while start < end:
 
-        if len(buffer) < patternsize:
-            bytesread = infile.read(patternsize - len(buffer))
+        if len(buffer) < headersize:
+            bytesread = infile.read(headersize - len(buffer))
             buffer.extend(bytesread)
-        if len(buffer) < patternsize:
-            logger.warning(f"Unable to read up to {patternsize} at {block_start}")
+        if len(buffer) < headersize:
+            logger.warning(f"Unable to read up to {headersize} at {start}")
             break
 
-        headerbuffer = bytes((buffer[i] for i in range(patternsize)))
+        headerbuffer = bytes((buffer[i] for i in range(headersize)))
 
-        header = struct.unpack(pattern, headerbuffer)
-        logger.debug(
-            f"Header at {block_start} is {header} or in raw bytes {headerbuffer}"
-        )
-
-        if check_bytes_header(header):
-            logger.debug(f"Matched header at {block_start} {header}")
-            # this is a valid location for a block
-            blocksize = header[11] - header[7] - 19
-            logger.debug(f"Block at {block_start} has cdata size = {blocksize}")
-            cdata = infile.read(blocksize)
-            assert (
-                len(cdata) == blocksize
-            ), f"Unable to read up to {blocksize} of cdata at {block_start}"
+        header = struct.unpack(headerpattern, headerbuffer)
+        # this is a valid location for a block
+        if check_is_header(header):
+            logger.debug(f"Matched header at {start}")
             buffer.clear()
+            got_content = True
 
-            # now do the actual decompression
-            decompressor = zlib.decompressobj(
-                wbits=-15
-            )  # we've alread read the header, so ignore it
-            decompressed = decompressor.decompress(cdata)
-            assert (
-                not decompressor.unconsumed_tail
-            ), f"unconsumed tail of {len(decompressor.unconsumed_tail)} at {block_start}"
-            assert (
-                not decompressor.unused_data
-            ), f"unused data present of {len(decompressor.unused_data)} at {block_start}"
-
-            # read isize and crc check
-            tailpattern = "<II"
-            tailpatternsize = struct.calcsize(tailpattern)
-            tailbytes = infile.read(tailpatternsize)
-            if len(tailbytes) != tailpatternsize:
-                raise ValueError(
-                    f"Unable to read {tailpatternsize} bytes for tail at {block_start}"
-                )
-            tail_crc, tail_isize = struct.unpack(tailpattern, tailbytes)
-            # check decompressed size is expected
-            assert len(decompressed) == tail_isize
-            # check crc check is expected
-            assert zlib.crc32(decompressed) == tail_crc
+            cdata, decompressed = get_cdata_decompressed(header, infile)
+            # need to handle the tail, will crc check
+            tail_crc, tail_isize = get_tail(infile, decompressed)
 
             # last block has no compressed content
             if decompressed:
-                got_content = True
                 yield decompressed
             else:
-                logger.warning(f"Found empty block at {block_start}")
                 break
 
-            logger.debug(f"Read block from {block_start} to {infile.tell()}")
+            logger.debug(f"Read block from {start} to {infile.tell()}")
 
-            block_start_next += patternsize + blocksize + tailpatternsize
+            start += headersize + len(cdata) + tailsize
         else:
             # move ahead a byte
             buffer.popleft()
-            block_start_next += 1
-
-        block_start = block_start_next
-
-    logger.debug(f"End of scan from {start} to {end} at {block_start}-{infile.tell()}")
+            start += 1
 
     if not got_content:
         logger.warning(f"Got to end of {start}-{end} without finding a block")
@@ -125,8 +130,7 @@ def _ranged_scan_and_read(infile, start, end, buffer=collections.deque()):
 def get_bgzip_lines_ranged(infilename, start, end):
     with open(infilename, "rb") as infile:
         line_last_old = None if start else b""
-        buffer = collections.deque()
-        for decompressed in _ranged_scan_and_read(infile, start, end, buffer):
+        for decompressed in _ranged_scan_and_read(infile, start, end):
             lines = decompressed.split(b"\n")
             line_first, lines, line_last = lines[0], lines[1:-1], lines[-1]
 
@@ -141,21 +145,18 @@ def get_bgzip_lines_ranged(infilename, start, end):
 
         # after getting all the lines in the block containing the "end" location
         # we also need to get the first partial line in the next block too
-        # pass the buffer along to solve sometimes needing to go back a little bit in the file!
         block_peek_start = infile.tell()
         decompressed = tuple(
             itertools.islice(
-                _ranged_scan_and_read(
-                    infile, block_peek_start, block_peek_start + 1, buffer
-                ),
+                _ranged_scan_and_read(infile, block_peek_start, block_peek_start + 1),
                 1,
             )
         )
         if len(decompressed):
             yield line_last_old + decompressed[0].split(b"\n", 1)[0]
         elif line_last_old:
-            # normally the last blockin the file is empty
-            logger.debug(f"Enpty block for peak into {block_peek_start}")
+            # normally the last block in the file is empty
+            logger.debug(f"Enpty block for peek into {block_peek_start}")
             yield line_last_old
 
 
@@ -238,3 +239,74 @@ def get_bgzip_lines_parallel(
     # at this point we have recieved all the sentinels, so we should be fine
     for subproc in subprocs:
         subproc.join(1)
+
+
+class BlockGZipWriter(io.BufferedWriter):
+    # buffer size is 64kb which is 1 block
+    def __init__(self, raw, buffer_size=65536):
+        super().__init__(raw, buffer_size)
+
+    def _flush_unlocked(self):
+        if self.closed:
+            raise ValueError("flush on closed file")
+        while self._write_buf:
+            block = self.make_block(self._write_buf)
+            try:
+                n = self.raw.write(block)
+            except BlockingIOError:
+                raise RuntimeError(
+                    "self.raw should implement RawIOBase: it "
+                    "should not raise BlockingIOError"
+                )
+            if n is None:
+                raise BlockingIOError(
+                    errno.EAGAIN, "write could not complete without blocking", 0
+                )
+            if n > len(block) or n < 0:
+                raise OSError("write() returned incorrect number of bytes")
+            del self._write_buf[:n]
+
+    @staticmethod
+    def compress_content(content: bytes):
+        # make a new compressor each time
+        compressor = zlib.compressobj(wbits=-15)
+        compressed = compressor.compress(content)
+        compressed = compressed + compressor.flush()
+
+        return compressed
+
+    @staticmethod
+    def generate_header(compressed: bytes) -> bytes:
+        patternhead = "<BBBBIBBHBBHH"
+        header = [0] * 12
+        header[0] = 31  # ID1
+        header[1] = 139  # ID2
+        header[2] = 8  # compression method
+        header[3] = 4  # flags bit2 FEXTRA
+        header[4] = 0  # MTIME
+        header[5] = 0  # eXtra FLags
+        header[6] = 255  # OS 255 is default unspecified
+        header[7] = 6  # XLEN
+        header[8] = 66
+        header[9] = 67
+        header[10] = 2
+        header[11] = len(compressed) + 6 + 19
+        headerbytes = struct.pack(patternhead, *header)
+        return headerbytes
+
+    @staticmethod
+    def generate_tail(content: bytes) -> bytes:
+        patterntail = "<II"
+        tail_crc = zlib.crc32(content)
+        tail_isize = len(content)
+        tail = [tail_crc, tail_isize]
+        tailbytes = struct.pack(patterntail, *tail)
+        return tailbytes
+
+    @classmethod
+    def make_block(cls, content: bytes) -> bytes:
+        compressed = cls.compress_content(content)
+        headerbytes = cls.generate_header(compressed)
+        tailbytes = cls.generate_tail(content)
+
+        return headerbytes + compressed + tailbytes
