@@ -1,4 +1,3 @@
-import collections
 import errno
 import io
 import itertools
@@ -21,7 +20,7 @@ tailpattern = "<II"
 tailsize = struct.calcsize(tailpattern)
 
 
-def check_is_header(header: bytes):
+def check_is_header(header):
     if header[0] != 31:
         return False
     if header[1] != 139:
@@ -77,60 +76,82 @@ def get_cdata_decompressed(header, infile):
     return cdata, decompressed
 
 
-# jump into the middle of a file and try to scan to the first block
-def _ranged_scan_and_read(infile, start, end):
+def blocks_in_file_slice(infile, start, end):
+    assert start >= 0
+    assert end >= 0
     assert start < end, "must span at least one byte!"
 
     infile.seek(start, os.SEEK_SET)
 
     # read the bgzip header
     # see https://samtools.github.io/hts-specs/SAMv1.pdf
-    got_content = False
-    buffer = collections.deque()
+
+    # use a buffer so we can look at the whole header, but
+    # step through the file
+    buffer = b""
+
     while start < end:
 
         if len(buffer) < headersize:
             bytesread = infile.read(headersize - len(buffer))
-            buffer.extend(bytesread)
+            buffer = buffer + bytesread
         if len(buffer) < headersize:
             logger.warning(f"Unable to read up to {headersize} at {start}")
             break
 
-        headerbuffer = bytes((buffer[i] for i in range(headersize)))
-
-        header = struct.unpack(headerpattern, headerbuffer)
+        header = struct.unpack(headerpattern, buffer)
         # this is a valid location for a block
         if check_is_header(header):
             logger.debug(f"Matched header at {start}")
-            buffer.clear()
-            got_content = True
+            buffer = b""
 
-            cdata, decompressed = get_cdata_decompressed(header, infile)
-            # need to handle the tail, will crc check
-            tail_crc, tail_isize = get_tail(infile, decompressed)
+            cdata = get_cdata(header, infile)
 
-            # last block has no compressed content
-            if decompressed:
-                yield decompressed
-            else:
-                break
+            # need to handle the tail
+            tail = get_tail(infile)
 
-            logger.debug(f"Read block from {start} to {infile.tell()}")
+            block_end = start + headersize + len(cdata) + tailsize
+            logger.debug(f"Read block from {start} to {block_end}")
 
-            start += headersize + len(cdata) + tailsize
+            yield start, header, cdata, tail
+
+            # prepare for the next block
+            start = block_end
+
         else:
             # move ahead a byte
-            buffer.popleft()
+            buffer = buffer[1:]
             start += 1
 
-    if not got_content:
-        logger.warning(f"Got to end of {start}-{end} without finding a block")
+
+def blocks_decompressed_in_file_slice(infile, start, end):
+    for start, header, cdata, tail in blocks_in_file_slice(infile, start, end):
+        # now do the actual decompression
+        decompressor = zlib.decompressobj(
+            wbits=-15
+        )  # we've alread read the header, so ignore it
+        decompressed = decompressor.decompress(cdata)
+
+        # check it with the tail
+        tail_crc, tail_isize = tail
+        # check decompressed size is expected
+        assert len(decompressed) == tail_isize
+        # check crc check is expected
+        assert zlib.crc32(decompressed) == tail_crc
+
+        yield start, header, cdata, decompressed, tail
 
 
 def get_bgzip_lines_ranged(infilename, start, end):
     with open(infilename, "rb") as infile:
         line_last_old = None if start else b""
-        for decompressed in _ranged_scan_and_read(infile, start, end):
+        for (
+            start,
+            header,
+            cdata,
+            decompressed,
+            tail,
+        ) in blocks_decompressed_in_file_slice(infile, start, end):
             lines = decompressed.split(b"\n")
             line_first, lines, line_last = lines[0], lines[1:-1], lines[-1]
 
@@ -146,17 +167,20 @@ def get_bgzip_lines_ranged(infilename, start, end):
         # after getting all the lines in the block containing the "end" location
         # we also need to get the first partial line in the next block too
         block_peek_start = infile.tell()
-        decompressed = tuple(
+        block = tuple(
             itertools.islice(
-                _ranged_scan_and_read(infile, block_peek_start, block_peek_start + 1),
+                blocks_decompressed_in_file_slice(
+                    infile, block_peek_start, block_peek_start + 1
+                ),
                 1,
             )
         )
-        if len(decompressed):
-            yield line_last_old + decompressed[0].split(b"\n", 1)[0]
+
+        if block:
+            start, header, cdata, decompressed, tail = block[0]
+            yield line_last_old + decompressed.split(b"\n", 1)[0]
         elif line_last_old:
             # normally the last block in the file is empty
-            logger.debug(f"Enpty block for peek into {block_peek_start}")
             yield line_last_old
 
 
