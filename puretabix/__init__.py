@@ -1,7 +1,3 @@
-from .bgzip import (  # noqa: disable=F401
-    BlockGZipWriter,
-    get_bgzip_lines_parallel,
-    get_bgzip_lines_ranged,
-)
+from . import bgzip  # noqa: disable=F401
 from .tabix import TabixIndex, TabixIndexedFile  # noqa: disable=F401
 from .vcf import VCFAccumulator, VCFLine, get_vcf_fsm  # noqa: disable=F401

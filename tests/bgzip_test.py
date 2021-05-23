@@ -1,13 +1,21 @@
 import os.path
 import tempfile
 
-from puretabix import BlockGZipWriter, get_bgzip_lines_parallel
+from puretabix.bgzip import (
+    BlockGZipWriter,
+    get_filename_parallel_lines,
+    get_filename_ranged_lines,
+)
 
 
 class TestBlockGZip:
+    def test_get_filename_ranged_lines(self, vcf_filename):
+        for line in get_filename_ranged_lines(vcf_filename, 0, 100):
+            print(line)
+
     def test_get_lines(self, vcf_filename, vcf_gz):
         lines = tuple(sorted(map(bytes.decode, vcf_gz.readlines())))
-        lines_parsed = tuple(sorted(get_bgzip_lines_parallel(vcf_filename)))
+        lines_parsed = tuple(sorted(get_filename_parallel_lines(vcf_filename)))
 
         for line_in, line_out in zip(lines, lines_parsed):
             print(line_in, line_out)
@@ -23,7 +31,7 @@ class TestBlockGZip:
                 for line in lines:
                     bgzipwriter.write(line.encode())
 
-            lines_parsed = tuple(sorted(get_bgzip_lines_parallel(bgzfilename)))
+            lines_parsed = tuple(sorted(get_filename_parallel_lines(bgzfilename)))
 
             for line_in, line_out in zip(lines, lines_parsed):
                 print(line_in, line_out)
