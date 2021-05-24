@@ -10,13 +10,13 @@ SENTINEL = "SENTINEL"
 def _multiprocess_generator_child(f, fkwargs, q, batchsize):
     batch = []
     for item in f(**fkwargs):
-        batch.append((fkwargs, item))
+        batch.append(item)
         # batch is full, send it and start a new one
         if len(batch) >= batchsize:
             q.put(batch)
             batch = []
     # send any leftover lines smaller than a batch
-    q.put(batch)
+    q.put((fkwargs, batch))
     # send a sentinel
     q.put(SENTINEL)
 
@@ -64,14 +64,15 @@ def from_multiprocess_generator(
     # to keep track of the number of active subprocs
     active = len(subprocs)
     while active > 0:
-        batch = q.get()
+        result = q.get()
         # we recieved a sentinel value to say that this chunk is complete
-        if batch == SENTINEL:
+        if result == SENTINEL:
             active -= 1
         else:
             # note this will be out of order between subprocesses
             # so we include the fkwargs for disambiguation by the caller if necessary
-            for fkwargs, item in batch:
+            fkwargs, batch = result
+            for item in batch:
                 yield fkwargs, item
 
     # make sure all the subprocesses terminate tidily
