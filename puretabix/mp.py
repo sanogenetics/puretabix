@@ -13,7 +13,7 @@ def _multiprocess_generator_child(f, fkwargs, q, batchsize):
         batch.append(item)
         # batch is full, send it and start a new one
         if len(batch) >= batchsize:
-            q.put(batch)
+            q.put((fkwargs, batch))
             batch = []
     # send any leftover lines smaller than a batch
     q.put((fkwargs, batch))
@@ -71,6 +71,7 @@ def from_multiprocess_generator(
         else:
             # note this will be out of order between subprocesses
             # so we include the fkwargs for disambiguation by the caller if necessary
+            assert len(result) == 2, f"expected 2 got {len(result)}"
             fkwargs, batch = result
             for item in batch:
                 yield fkwargs, item
