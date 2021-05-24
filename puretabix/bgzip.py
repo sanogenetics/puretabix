@@ -40,6 +40,13 @@ def check_is_header(header):
     return True
 
 
+def get_header(infile):
+    bytesread = infile.read(headersize)
+    header = struct.unpack(headerpattern, bytesread)
+    assert check_is_header(header)
+    return header
+
+
 def get_cdata(header, infile):
     blocksize = header[11] - header[7] - 19
     cdata = infile.read(blocksize)
