@@ -215,7 +215,7 @@ def get_filename_parallel_lines(infilename, nprocs=multiprocessing.cpu_count()):
 
 class BlockGZipWriter(io.BufferedIOBase):
     # buffer size is 64kb which is 1 block
-    def __init__(self, raw: io.RawIOBase, block_size=65536):
+    def __init__(self, raw: io.IOBase, block_size=65536):
         self.raw = raw
         assert self.raw.writable()
         self.block_size = block_size
