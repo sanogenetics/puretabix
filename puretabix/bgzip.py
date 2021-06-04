@@ -40,21 +40,23 @@ def check_is_header(header):
     return True
 
 
-def get_header(infile):
+def get_header(infile: io.IOBase):
     bytesread = infile.read(headersize)
+    if len(bytesread) < headersize:
+        raise EOFError
     header = struct.unpack(headerpattern, bytesread)
     assert check_is_header(header)
     return header
 
 
-def get_cdata(header, infile):
+def get_cdata(header, infile: io.IOBase):
     blocksize = header[11] - header[7] - 19
     cdata = infile.read(blocksize)
     assert len(cdata) == blocksize, f"Unable to read up to {blocksize} of cdata"
     return cdata
 
 
-def get_tail(infile, decompressed=None):
+def get_tail(infile: io.IOBase, decompressed=None):
     # read isize and crc check
     tailbytes = infile.read(tailsize)
     if len(tailbytes) != tailsize:
@@ -83,6 +85,29 @@ def get_cdata_decompressed(header, infile):
         not decompressor.unused_data
     ), f"unused data present of {len(decompressor.unused_data)}"
     return cdata, decompressed
+
+
+def get_block(infile):
+    header = get_header(infile)
+    cdata, decompressed = get_cdata_decompressed(header, infile)
+    tail = get_tail(infile, decompressed)
+    return header, cdata, decompressed, tail
+
+
+def get_lines(infile):
+    start = infile.tell()
+    header, cdata, decompressed, tail = get_block(infile)
+    decompressedlines = decompressed.split(b"\n")
+    if start == 0:
+        # first block has no partial start line
+        firstline = b""
+        lines = decompressedlines[0:-1]
+        lastline = decompressedlines[-1]
+    else:
+        firstline = decompressedlines[0]
+        lines = decompressedlines[1:-1]
+        lastline = decompressedlines[-1]
+    return firstline, lines, lastline
 
 
 def get_file_ranged_blocks(infile, start, end):
@@ -140,6 +165,9 @@ def get_file_ranged_decompressed(infile, start, end):
             wbits=-15
         )  # we've alread read the header, so ignore it
         decompressed = decompressor.decompress(cdata)
+
+        assert not decompressor.unconsumed_tail
+        assert not decompressor.unused_data
 
         # check it with the tail
         tail_crc, tail_isize = tail
