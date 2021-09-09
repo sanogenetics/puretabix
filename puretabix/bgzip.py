@@ -110,6 +110,45 @@ def get_lines(infile):
     return firstline, lines, lastline
 
 
+def generate_offset_lines(infile):
+    # go to the start
+    infile.seek(0)
+    start_previous = None
+    start = 0
+    lastline = ""
+    offset = 0
+    while True:
+        start_previous = start
+        start = infile.tell()
+        header, cdata, decompressed, tail = get_block(infile)
+        if not decompressed:
+            # empty block is last block
+            if lastline:
+                yield start_previous, offset, start_previous, offset + len(
+                    lastline
+                ), lastline
+
+        decompressedlines = decompressed.split(b"\n")
+        if start == 0:
+            # first block has no partial start line
+            firstline = b""
+            offset = 0
+            lines = decompressedlines[0:-1]
+            lastline = decompressedlines[-1]
+        else:
+            firstline = decompressedlines[0]
+            # this should be added to the last line from the previous block
+            yield start_previous, offset, start, len(firstline), lastline + firstline
+
+            offset = len(firstline) + 1
+            lines = decompressedlines[1:-1]
+            lastline = decompressedlines[-1]
+
+        for line in lines:
+            yield start, offset, start, offset + len(line), line
+            offset += len(line) + 1
+
+
 def get_file_ranged_blocks(infile, start, end):
     assert start >= 0
     assert end >= 0
@@ -181,9 +220,13 @@ def get_file_ranged_decompressed(infile, start, end):
 
 def get_file_ranged_lines(infile, start, end):
     line_last_old = None if start else b""
-    for (start, header, cdata, decompressed, tail,) in get_file_ranged_decompressed(
-        infile, start, end
-    ):
+    for (
+        start,
+        header,
+        cdata,
+        decompressed,
+        tail,
+    ) in get_file_ranged_decompressed(infile, start, end):
         lines = decompressed.split(b"\n")
         line_first, lines, line_last = lines[0], lines[1:-1], lines[-1]
 
