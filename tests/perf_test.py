@@ -127,7 +127,7 @@ if __name__ == "__main__":
         with open(pth, "rb") as vcf_tbi:
 
             for _ in range(100):
-                indexed = puretabix.TabixIndexedFile(vcf, vcf_tbi)
+                indexed = puretabix.TabixIndexedFile.from_files(vcf, vcf_tbi)
 
                 # fetched = indexed.fetch("1", 1108138 - 10, 1108138 + 10)
                 # fetched = indexed.fetch("1", 1108138)

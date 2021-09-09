@@ -1,5 +1,4 @@
 import gzip
-import io
 import itertools
 import logging
 import struct
@@ -9,7 +8,16 @@ logger = logging.getLogger(__name__)
 
 
 class TabixIndex:
-    def __init__(self, fileobj):
+    def __init__(
+        self,
+        file_format,
+        column_sequence,
+        column_begin,
+        column_end,
+        meta,
+        headerlines_count,
+        indexes,
+    ):
         """
         In-memory representation of a Tabix index. See https://samtools.github.io/hts-specs/tabix.pdf
         for more information.
@@ -17,67 +25,78 @@ class TabixIndex:
         Generally these are pretty small files that need to be read entirely, thus downloading them
         locally before processing is recommented e.g. io.BytesIO
         """
-        self._fileobject = fileobj
-        self.magic = None
-        self.n_sequences = None
-        self.file_format = None
-        self.column_sequence = 0  # column for sequence ids, 1-based
-        self.column_begin = 0  # column for region start, 1-based
-        self.column_end = 0  # column for region end, 1-based
-        self.meta = None
-        self.headerlines_count = None
-        self.names = None
-        self.index_bin = {}
-        self.index_interval = {}
 
-        # pre-process the file
-        self._parse_index()
+        # 0 = generic tab-delemited
+        # 1 = SAM
+        # 2 = VCF
+        self.file_format = file_format
+        # column for sequence ids, 1-based
+        self.column_sequence = column_sequence
+        # column for region start, 1-based
+        self.column_begin = column_begin
+        # column for region end, 1-based
+        self.column_end = column_end
+        self.meta = meta
+        self.headerlines_count = headerlines_count
 
-    def _parse_index(self):
+        # a dictionary of names to (bin_index, interval_index)
+        self.indexes = indexes
+
+    @classmethod
+    def from_file(cls, fileobj):
+        """
+        Generally these are pretty small files that need to be read entirely, thus downloading them
+        locally before processing is recommented e.g. io.BytesIO
+        """
         # the index file is block-gzipped but small enough we can
         # load it into memory and process like a regular gzip file
-        with gzip.GzipFile(fileobj=self._fileobject) as f:
+        with gzip.GzipFile(fileobj=fileobj) as f:
             header_pattern = "<4siiiii4sii"
             header = struct.unpack(
                 header_pattern, f.read(struct.calcsize(header_pattern))
             )
 
-            self.magic = header[0]
-            if self.magic != b"TBI\01":  # check magic
-                raise RuntimeError(f"invalid tabix index magic {self.magic}.")
+            magic = header[0]
+            if magic != b"TBI\01":  # check magic
+                raise RuntimeError(f"invalid tabix index magic {magic}.")
 
-            self.file_format = header[2]
+            # number of named sequences (e.g. chromosomes)
+            n_sequences = header[1]
+
+            file_format = header[2]
             # 0 = generic tab-delemited
             # 1 = SAM
             # 2 = VCF
-            if self.file_format not in (0, 1, 2):
-                raise RuntimeError(f"invalid tabix index format {self.file_format}.")
+            if file_format not in (0, 1, 2):
+                raise RuntimeError(f"invalid tabix index format {file_format}.")
 
             # these are 1 based
             # value of 0 states not included in file
             # e.g. VCF has no explicit end column
-            self.column_sequence = header[3]  # Column for the sequence name
-            self.column_begin = header[4]  # Column for the start of a region
-            self.column_end = header[5]  # Column for the end of a region
+            column_sequence = header[3]  # Column for the sequence name
+            column_begin = header[4]  # Column for the start of a region
+            column_end = header[5]  # Column for the end of a region
 
             # this is the comment marker, usually #
-            self.meta = header[6].decode("ascii")
+            meta = header[6].decode("ascii")[0]
+            assert meta == "#", (header[6], meta)
 
             # number of lines of header at the start of the file
             # this does not include lines marked as comments
-            self.headerlines_count = header[7]
+            headerlines_count = header[7]
 
             # sequence names are a series of bytes followed by a null byte
-            self.names = tuple(
+            names = tuple(
                 map(bytes.decode, f.read(header[8]).split(b"\x00")[:-1])
             )  # throw the last empty one away
-            if len(self.names) != header[1]:
+            if len(names) != n_sequences:
                 raise RuntimeError(
-                    f"unexpected number of sequences {header[1]} vs {len(self.names)}"
+                    f"unexpected number of sequences {n_sequences} vs {len(names)}"
                 )
 
+            indexes = {}
             # for each sequence
-            for name in self.names:
+            for name in names:
                 # each sequence has a bin index and an interval index
 
                 # parse the bin index
@@ -93,9 +112,6 @@ class TabixIndex:
 
                     assert bin_key not in bins
                     bins[bin_key] = chunks
-                if name in self.index_bin:
-                    raise RuntimeError(f"duplicate sequence name {name}")
-                self.index_bin[name] = bins
 
                 # parse the interval index
                 n_intervals = struct.unpack("<i", f.read(4))[0]
@@ -103,9 +119,22 @@ class TabixIndex:
                     i[0] for i in struct.iter_unpack("<Q", f.read(8 * n_intervals))
                 ]
 
-                if name in self.index_interval:
+                if name in indexes:
                     raise RuntimeError(f"duplicate sequence name {name}")
-                self.index_interval[name] = intervals
+                indexes[name] = (bins, intervals)
+
+        return cls(
+            file_format,
+            column_sequence,
+            column_begin,
+            column_end,
+            meta,
+            headerlines_count,
+            indexes,
+        )
+
+    def __repr__(self):
+        return f"TabixIndex({self.file_format}, {self.column_sequence}, {self.column_begin}, {self.column_end}, {self.meta}, {self.headerlines_count}, {self.indexes})"
 
     def _lookup_linear(self, sequence_name, start):
         """
@@ -120,13 +149,14 @@ class TabixIndex:
         # throw away the first 14 bits to get index position
         i = start >> 14
         # if this sequence_name isn't valid, say that
-        if sequence_name not in self.index_interval:
+        if sequence_name not in self.indexes:
             return None
+        linear_index = self.indexes[sequence_name][1]
         # if it would be beyond the index, say that
-        if i >= len(self.index_interval[sequence_name]):
+        if i >= len(linear_index):
             return None
         # its a valid sequnce name and a valid interval window
-        return self.index_interval[sequence_name][i]
+        return linear_index[i]
 
     def _lookup_bin_chunks(self, sequence_name, start, end):
         """
@@ -134,9 +164,10 @@ class TabixIndex:
         So we want all the records in all the bins that overlap with the region of interest.
         These records *might* overlap with the region of interest.
         """
+        bin_index = self.indexes[sequence_name][0]
         for chunks_bin_index in reversed(tuple(self.region_to_bins(start, end))):
-            if chunks_bin_index in self.index_bin[sequence_name]:
-                for chunk in self.index_bin[sequence_name][chunks_bin_index]:
+            if chunks_bin_index in bin_index:
+                for chunk in bin_index[chunks_bin_index]:
                     yield chunk
 
     def lookup_virtual(self, sequence_name, start, end):
@@ -170,6 +201,54 @@ class TabixIndex:
 
         return virtual_start, virtual_end
 
+    def write_to(self, outfile):
+        # header
+        outfile.write(
+            struct.pack(
+                "<4siiiii4si",
+                b"TBI\01",  # magic number
+                len(self.indexes),  # n sequences
+                self.file_format,  # file format 0 generic, 1 sam, 2 vcf
+                self.column_sequence,  # column for sequence ids, 1-based
+                self.column_begin,  # column for region start, 1-based
+                self.column_end,  # column for region end, 1-based
+                self.meta.encode("ascii")
+                + b"\x00\x00\x00",  # this is a character, but represented as a int
+                self.headerlines_count,
+            )
+        )
+
+        print(self.meta)
+        print(self.meta.encode("ascii"))
+        print(self.meta.encode("ascii") + b"\x00\x00\x00")
+        # length of concatenated zero terminated names
+        names = tuple(self.indexes.keys())  # ensure consistent order
+        names_concat = b"".join((i.encode("ascii") + b"\0" for i in names))
+        outfile.write(
+            struct.pack(f"<i{len(names_concat)}s", len(names_concat), names_concat)
+        )
+
+        for name in names:
+            # n_bin
+            #   bin
+            #   n_chunk
+            #     chunk_begin
+            #     chunk_end
+            # n_intv
+            #   ioff
+            bin_index = self.indexes[name][0]
+            outfile.write(struct.pack("<i", len(bin_index)))
+            for bin_i in bin_index.keys():
+                # unsigned bin number, n_chunk
+                outfile.write(struct.pack("<Ii", bin_i, len(bin_index[bin_i])))
+                for chunk_begin, chunk_end in bin_index[bin_i]:
+                    outfile.write(struct.pack("<QQ", chunk_begin, chunk_end))
+
+            intv_index = self.indexes[name][1]
+            outfile.write(struct.pack("<i", len(intv_index)))
+            for ioff in intv_index:
+                outfile.write(struct.pack("<Q", ioff))
+
     @staticmethod
     def region_to_bins(begin, end, n_levels=5, min_shift=14):
         """
@@ -192,14 +271,52 @@ class TabixIndex:
             t += 1 << ((level << 1) + level)
             s -= 3
 
+    @staticmethod
+    def region_to_bin(begin, end):
+        """
+        returns the index of the smallest bin that contains the region
+        as a half-closed half-open interval
+        """
+        if begin >> 14 == end >> 14:
+            return ((1 << 15) - 1) // 7 + (begin >> 14)
+        elif begin >> 17 == end >> 17:
+            return ((1 << 12) - 1) // 7 + (begin >> 17)
+        elif begin >> 20 == end >> 20:
+            return ((1 << 9) - 1) // 7 + (begin >> 20)
+        elif begin >> 23 == end >> 23:
+            return ((1 << 6) - 1) // 7 + (begin >> 23)
+        elif begin >> 26 == end >> 26:
+            return ((1 << 3) - 1) // 7 + (begin >> 26)
+        return 0
+
+    @staticmethod
+    def bin_start(k):
+        # bit_length-1 is int log2
+        lvl = (((7 * k) + 1).bit_length() - 1) // 3
+        ol = ((2 ** (3 * lvl)) - 1) // 7
+        sl = 2 ** (29 - (3 * lvl))
+        start = (k - ol) * sl
+        return start
+
+    @staticmethod
+    def bin_size(k):
+        # bit_length-1 is int log2
+        lvl = (((7 * k) + 1).bit_length() - 1) // 3
+        sl = 2 ** (29 - (3 * lvl))
+        return sl
+
 
 class TabixIndexedFile:
-    def __init__(self, fileobj, index_fileobj):
-        self.index = TabixIndex(index_fileobj)
+    def __init__(self, fileobj, index):
+        self.index = index
         self.fileobj = fileobj
         # check fileobject is a real block-gzipped file
         if not self.is_block_gzip():
             raise ValueError("fileobj must be a block gzipped file-like object")
+
+    @staticmethod
+    def from_files(fileobj, index_fileobj):
+        return TabixIndexedFile(fileobj, TabixIndex.from_file(index_fileobj))
 
     def is_gzip(self):
         """is bytes_data a valid gzip file?"""
@@ -219,13 +336,54 @@ class TabixIndexedFile:
         header = struct.unpack("<ccH", bytes_data)
         return header[0] == b"B" and header[1] == b"C" and header[2] == 2
 
-    def fetch(self, name, start, end=None):
+    def fetch_bytes_virtual(self, virtual_start, virtual_end):
+        # the lower 16 bits store the offset of the byte inside the gzip block
+        # the rest store the offset of gzip block
+        block_start = virtual_start >> 16
+        offset_start = virtual_start & 0xFFFF
+        block_end = virtual_end >> 16
+        offset_end = virtual_end & 0xFFFF
+        return self.fetch_bytes_block_offset(
+            block_start, offset_start, block_end, offset_end
+        )
+
+    def fetch_bytes_block_offset(
+        self, block_start, offset_start, block_end, offset_end
+    ):
+        value = b""
+        block_current = block_start
+        self.fileobj.seek(block_start)
+        while block_current <= block_end:
+            # read this block
+            print(self.fileobj.tell())
+            block, block_size = self._read_block(None)
+
+            if block_current == block_start and block_current == block_end:
+                # we want a slice of this block only
+                value = value + block[offset_start:offset_end]
+            elif block_current == block_start:
+                # we want everything else in the block
+                value = value + block[offset_start:]
+            elif block_current == block_end:
+                # we want to stop within this block
+                value = value + block[:offset_end]
+            else:
+                raise RuntimeError(
+                    f"Unexepcted block {block_current} {block_start} {block_end}"
+                )
+
+            # move to next block
+            block_current += block_size
+
+        return value
+
+    def fetch_bytes(self, name, start, end=None):
         """
-        Returns a text block of lines that are included in the region of interest
+        Returns bytes in the region of interest
         """
         # quick check
-        if name not in self.index.names:
-            return ""
+        if name not in self.index.indexes.keys():
+            return b""
 
         # default if only start specified
         if not end:
@@ -236,39 +394,26 @@ class TabixIndexedFile:
 
         # location not indexed, return empty string
         if not virtual_start and not virtual_end:
+            return b""
+
+        return self.fetch_bytes_virtual(virtual_start, virtual_end)
+
+    def fetch(self, name, start, end=None):
+        """
+        Returns lines in the region of interest
+        """
+        # default if only start specified
+        if not end:
+            end = start
+
+        region = self.fetch_bytes(name, start, end)
+        # no region, no lines
+        if not region:
             return ""
-
-        # the lower 16 bits store the offset of the byte inside the gzip block
-        # the rest store the offset of gzip block
-        block_start = virtual_start >> 16
-        offset_start = virtual_start & 0xFFFF
-        block_end = virtual_end >> 16
-        offset_end = None  # this is important only in the last block
-
-        value = io.BytesIO()
-        while block_start <= block_end:
-            # if this is the last block, then we need the ending offset
-            if block_start == block_end:
-                offset_end = virtual_end & 0xFFFF
-
-            # read this block
-            block, block_size = self._read_block(block_start)
-
-            # take the content of interest out of the block
-            if offset_end is None:
-                # we want everything else in the block
-                value.write(block[offset_start:])
-            else:
-                # we want to stop within this block
-                value.write(block[offset_start:offset_end])
-
-            # move to next block
-            offset_start = 0
-            block_start += block_size
 
         # turn the bytes into a list of strings
         # TODO ascii vs utf-8?
-        lines = io.StringIO(value.getvalue().decode("ascii"))
+        lines = region.decode("ascii").splitlines()
 
         # skip header lines defined in index
         if self.index.headerlines_count:
@@ -311,8 +456,9 @@ class TabixIndexedFile:
         return "".join(lines)
 
     def _read_block(self, offset):
-        # move the underlying file-like object to the right place
-        self.fileobj.seek(offset)
+        if offset is not None:
+            # move the underlying file-like object to the right place
+            self.fileobj.seek(offset)
         # read the first few bytes of the block from the source
         # TODO validate this block
         block_header = self.fileobj.read(18)
