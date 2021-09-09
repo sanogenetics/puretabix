@@ -1,4 +1,22 @@
 import puretabix
+from puretabix.vcf import VCFLine
+
+
+class TestVCFLineConstructors:
+    def test_comment_raw(self):
+        line = VCFLine.as_comment_raw("Hello world")
+        linestr = str(line)
+        assert linestr == "#Hello world"
+
+    def test_comment_key_string(self):
+        line = VCFLine.as_comment_key_string("Hello", "world")
+        linestr = str(line)
+        assert linestr == "##Hello=world"
+
+    def test_comment_key_dict(self):
+        line = VCFLine.as_comment_key_dict("foo", {"Hello": "world", "spam": "eggs"})
+        linestr = str(line)
+        assert linestr == "##foo=<Hello=world,spam=eggs>"
 
 
 class TestVCFFSM:

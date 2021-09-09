@@ -114,6 +114,63 @@ class VCFLine:
                     line = line + "\t" + sample_values
                 return line
 
+    @classmethod
+    def as_comment_raw(cls, comment_raw):
+        return cls(
+            comment_raw,
+            comment_key="",
+            comment_value_str="",
+            comment_value_dict={},
+            chrom="",
+            pos=0,
+            _id=[],
+            ref="",
+            alt=[],
+            qual_str="",
+            _filter="",
+            info={},
+            sample=[],
+        )
+
+    @classmethod
+    def as_comment_key_string(cls, key, value_str):
+        # for example ##fileformat=VCFv4.3
+        return cls(
+            comment_raw="",
+            comment_key=key,
+            comment_value_str=value_str,
+            comment_value_dict={},
+            chrom="",
+            pos=0,
+            _id=[],
+            ref="",
+            alt=[],
+            qual_str="",
+            _filter="",
+            info={},
+            sample=[],
+        )
+
+    @classmethod
+    def as_comment_key_dict(cls, key, value_dict):
+        # for example
+        # ##INFO=<ID=ID,Number=number,Type=type,Description="description",Source="source",Version="version">
+        return cls(
+            comment_raw="",
+            comment_key=key,
+            comment_value_str="",
+            comment_value_dict=value_dict,
+            chrom="",
+            pos=0,
+            _id=[],
+            ref="",
+            alt=[],
+            qual_str="",
+            _filter="",
+            info={},
+            sample=[],
+        )
+
 
 class VCFAccumulator:
     def __init__(self):
@@ -129,7 +186,7 @@ class VCFAccumulator:
         self._comment_struct_key = ""
         self._comment_struct_value = ""
         self.chrom = ""
-        self.pos = ""
+        self.pos = 0
         self._id = []
         self.ref = ""
         self.alt = []
