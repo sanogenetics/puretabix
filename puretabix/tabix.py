@@ -4,6 +4,14 @@ import logging
 import struct
 import zlib
 
+from .bgzip import (
+    check_is_block_gzip,
+    check_is_gzip,
+    generate_offset_lines,
+    get_file_ranged_decompressed,
+)
+from .vcf import LINE_START, VCFAccumulator, get_vcf_fsm
+
 logger = logging.getLogger(__name__)
 
 
@@ -218,9 +226,6 @@ class TabixIndex:
             )
         )
 
-        print(self.meta)
-        print(self.meta.encode("ascii"))
-        print(self.meta.encode("ascii") + b"\x00\x00\x00")
         # length of concatenated zero terminated names
         names = tuple(self.indexes.keys())  # ensure consistent order
         names_concat = b"".join((i.encode("ascii") + b"\0" for i in names))
@@ -248,6 +253,124 @@ class TabixIndex:
             outfile.write(struct.pack("<i", len(intv_index)))
             for ioff in intv_index:
                 outfile.write(struct.pack("<Q", ioff))
+
+    @classmethod
+    def build_from(cls, vcffile):
+        """
+        read a vcf file in blockgzip format and create an index object for it
+        """
+
+        file_format = 2  # 0 generic, 1 sam, 2 vcf
+        column_sequence = 1  # column for sequence ids, 1-based
+        column_begin = 2  # column for region start, 1-based
+        column_end = 0  # column for region end, 1-based
+        meta = "#"
+
+        # dictionary of names to (bin_index, interval_index)
+        # bin_index is a dictionary of bin numbers to [(chunk_start, chunk_end),...]
+        # interval_index is a list of 16kbase interval start locations
+        indexes = {}
+
+        # go through each line in turn
+        # parse it into a structured object
+        vcf_fsm = get_vcf_fsm()
+        accumulator = VCFAccumulator()
+
+        # these are the internal two index types
+        bin_index = {}
+        interval_index = {}
+
+        try:
+            for (
+                start_block,
+                start_offset,
+                end_block,
+                end_offset,
+                line,
+            ) in generate_offset_lines(vcffile):
+                if not line:
+                    continue
+
+                vcf_fsm.run(line.decode() + "\n", LINE_START, accumulator)
+                vcf_line = accumulator.to_vcfline()
+                accumulator.reset()
+                # TODO add better debugging for unexpected lines
+
+                # skip any comment lines with # or ##
+                if vcf_line.comment_raw or vcf_line.comment_key:
+                    continue
+
+                # have we started a new chromosome?
+                if vcf_line.chrom not in indexes:
+                    indexes[vcf_line.chrom] = ({}, [])
+                    bin_index = indexes[vcf_line.chrom][0]
+                    interval_index = indexes[vcf_line.chrom][1]
+
+                # get the combined number for the block & offset
+                start_virtual = start_block << 16 | start_offset
+                end_virtual = end_block << 16 | end_offset
+
+                # subtract 1 because its 0 offset
+                record_start = vcf_line.pos - 1
+                # subtract another 1 because half-open end
+                record_end = vcf_line.pos - 1 + len(vcf_line.ref) - 1
+
+                # bin index
+                # smallest bin that completely contains the record
+
+                bin_i = cls.region_to_bin(record_start, record_end)
+
+                if bin_i not in bin_index.keys():
+                    bin_index[bin_i] = [(start_virtual, end_virtual + 1)]
+                else:
+                    # extend chunk if directly continuous
+                    if bin_index[bin_i][-1][1] == start_virtual:
+                        bin_index[bin_i][-1] = (
+                            bin_index[bin_i][-1][0],
+                            end_virtual + 1,
+                        )
+                    else:
+                        bin_index[bin_i].append((start_virtual, end_virtual + 1))
+
+                # interval index
+                # is the lowest virtual offset of all records that overlap interval
+                # half-closed half-open records
+
+                # throw away the first 14 bits to get interval index
+                # e.g. 0 => 0, 16384 => 1, etc
+                interval_i_start = record_start >> 14
+                # subtract another 1 because half-open end
+                interval_i_end = record_end >> 14
+
+                for linear_i in sorted(set((interval_i_start, interval_i_end))):
+                    # add any padding intervals
+                    while len(interval_index) <= linear_i:
+                        interval_index.append(-1)
+
+                    # if there is no previous value, or the previous value was higher
+                    # replace previous value
+                    if (
+                        interval_index[linear_i] == -1
+                        or start_virtual < interval_index[linear_i]
+                    ):
+                        interval_index[linear_i] = start_virtual
+
+                # pass through again and replace any -1 values with the last "not -1" value
+                # these are intervals with no overlapping records
+                lastgood = -1
+                for i in range(len(interval_index)):
+                    if interval_index[i] == -1:
+                        interval_index[i] = lastgood
+                    else:
+                        lastgood = interval_index[i]
+        except EOFError:
+            # if we reach the end of the file, ignore it because index will be complete
+            # TODO look for bgzip empty block instead
+            pass
+
+        return cls(
+            file_format, column_sequence, column_begin, column_end, meta, 0, indexes
+        )
 
     @staticmethod
     def region_to_bins(begin, end, n_levels=5, min_shift=14):
@@ -319,22 +442,12 @@ class TabixIndexedFile:
         return TabixIndexedFile(fileobj, TabixIndex.from_file(index_fileobj))
 
     def is_gzip(self):
-        """is bytes_data a valid gzip file?"""
-        self.fileobj.seek(0)
-        bytes_data = self.fileobj.read(3)
-        header = struct.unpack("<BBB", bytes_data)
-        return header[0] == 31 and header[1] == 139 and header[2] == 8
+        """is fileobj a valid gzip file?"""
+        return check_is_gzip(self.fileobj)
 
     def is_block_gzip(self):
-        """is bytes_data is a valid block gzip file?"""
-        if not self.is_gzip():
-            return False
-        # NOTE assumes there is only one extra header
-        # not sure if this is required by block gzip spec or not
-        self.fileobj.seek(12)
-        bytes_data = self.fileobj.read(4)
-        header = struct.unpack("<ccH", bytes_data)
-        return header[0] == b"B" and header[1] == b"C" and header[2] == 2
+        """is fileobj is a valid block gzip file?"""
+        return check_is_block_gzip(self.fileobj)
 
     def fetch_bytes_virtual(self, virtual_start, virtual_end):
         # the lower 16 bits store the offset of the byte inside the gzip block
@@ -351,30 +464,14 @@ class TabixIndexedFile:
         self, block_start, offset_start, block_end, offset_end
     ):
         value = b""
-        block_current = block_start
-        self.fileobj.seek(block_start)
-        while block_current <= block_end:
-            # read this block
-            print(self.fileobj.tell())
-            block, block_size = self._read_block(None)
-
-            if block_current == block_start and block_current == block_end:
-                # we want a slice of this block only
-                value = value + block[offset_start:offset_end]
-            elif block_current == block_start:
-                # we want everything else in the block
-                value = value + block[offset_start:]
-            elif block_current == block_end:
-                # we want to stop within this block
-                value = value + block[:offset_end]
-            else:
-                raise RuntimeError(
-                    f"Unexepcted block {block_current} {block_start} {block_end}"
-                )
-
-            # move to next block
-            block_current += block_size
-
+        for start, _, _, decompressed, _ in get_file_ranged_decompressed(
+            self.fileobj, block_start, block_end + 1
+        ):
+            if start == block_end:
+                decompressed = decompressed[:offset_end]
+            if start == block_start:
+                decompressed = decompressed[offset_start:]
+            value = value + decompressed
         return value
 
     def fetch_bytes(self, name, start, end=None):

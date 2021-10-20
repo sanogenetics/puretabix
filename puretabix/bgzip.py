@@ -22,6 +22,26 @@ tailpattern = "<II"
 tailsize = struct.calcsize(tailpattern)
 
 
+def check_is_gzip(fileobj):
+    """is bytes readable file a valid gzip file?"""
+    fileobj.seek(0)
+    bytes_data = fileobj.read(3)
+    header = struct.unpack("<BBB", bytes_data)
+    return header[0] == 31 and header[1] == 139 and header[2] == 8
+
+
+def check_is_block_gzip(fileobj):
+    """is bytes readable file is a valid block gzip file?"""
+    if not check_is_gzip(fileobj):
+        return False
+    # NOTE assumes there is only one extra header
+    # not sure if this is required by block gzip spec or not
+    fileobj.seek(12)
+    bytes_data = fileobj.read(4)
+    header = struct.unpack("<ccH", bytes_data)
+    return header[0] == b"B" and header[1] == b"C" and header[2] == 2
+
+
 def check_is_header(header):
     if header[0] != 31:
         return False
