@@ -1,3 +1,4 @@
+3.1.1, 2021/10/20 -- Initial tabix index creation
 3.0.1, 2021/09/11 -- Align BGZip block size with bgzip util
 3.0.0, 2021/09/09 -- Use of constructors, BGZip writing
 2.0.0, 2021/05/23 -- Expand and rework BGZip handling
