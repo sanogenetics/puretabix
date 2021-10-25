@@ -1,3 +1,4 @@
+3.1.2, 2021/10/25 -- Use multiprocess pipe not queue for AWS lambda compatibility
 3.1.1, 2021/10/20 -- Initial tabix index creation
 3.0.1, 2021/09/11 -- Align BGZip block size with bgzip util
 3.0.0, 2021/09/09 -- Use of constructors, BGZip writing
