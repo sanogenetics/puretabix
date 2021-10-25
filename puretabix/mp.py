@@ -20,7 +20,6 @@ def _multiprocess_generator_child(f, fkwargs, q, batchsize):
             batch.append(item)
             # batch is full, send it and start a new one
             if len(batch) >= batchsize:
-                print("spam", fkwargs)
                 q.send([fkwargs, batch])
                 batch = []
         # send any leftover lines smaller than a batch
