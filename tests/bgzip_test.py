@@ -15,7 +15,11 @@ class TestBlockGZip:
 
     def test_get_lines(self, vcf_filename, vcf_gz):
         lines = tuple(sorted(map(bytes.decode, vcf_gz.readlines())))
+        print(f"read {len(lines)} for testing")
         lines_parsed = tuple(sorted(get_filename_parallel_lines(vcf_filename)))
+        print(f"read {len(lines_parsed)} for in parallel")
+
+        assert len(lines) == len(lines_parsed)
 
         for line_in, line_out in zip(lines, lines_parsed):
             print(line_in, line_out)

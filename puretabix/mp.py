@@ -4,21 +4,32 @@ try:
 except ImportError:
     import multiprocessing
 
+
+"""
+Note, AWS Lambda doesn't support shared memory locks because /dev/shm
+does not exist. Therefore we use pipes here instead of queues.
+"""
+
 SENTINEL = "SENTINEL"
 
 
 def _multiprocess_generator_child(f, fkwargs, q, batchsize):
-    batch = []
-    for item in f(**fkwargs):
-        batch.append(item)
-        # batch is full, send it and start a new one
-        if len(batch) >= batchsize:
-            q.put((fkwargs, batch))
-            batch = []
-    # send any leftover lines smaller than a batch
-    q.put((fkwargs, batch))
-    # send a sentinel
-    q.put(SENTINEL)
+    try:
+        batch = []
+        for item in f(**fkwargs):
+            batch.append(item)
+            # batch is full, send it and start a new one
+            if len(batch) >= batchsize:
+                print("spam", fkwargs)
+                q.send([fkwargs, batch])
+                batch = []
+        # send any leftover lines smaller than a batch
+        q.send([fkwargs, batch])
+    finally:
+        # send a sentinel
+        q.send(SENTINEL)
+        # close the child-side end of the pipe
+        q.close()
 
 
 def from_multiprocess_generator(
@@ -44,39 +55,61 @@ def from_multiprocess_generator(
     number of items in the queue is queuesize * batchsize * len(genfunckwargs)
     """
 
-    # this is the queue the results will be returned from subprocs via
-    q = multiprocessing.Queue(len(genfunckwargs) * queuesize)
-
+    # multiprocessing.Queue isn't support on AWS Lambda
+    # so instead of a shared queue, need one pipe per process
+    piperesults = []
     # create the subprocesses
     # TODO wrap in conext manager for cleanup
     subprocs = []
     for i in range(len(genfunckwargs)):
+        pipeparent, pipechild = multiprocessing.Pipe(
+            duplex=True
+        )  # need duplex to flow from child to parent
         subproc = multiprocessing.Process(
             target=_multiprocess_generator_child,
-            args=(genfunc, genfunckwargs[i], q, batchsize,),
+            args=(
+                genfunc,
+                genfunckwargs[i],
+                pipechild,
+                batchsize,
+            ),
         )
         subprocs.append(subproc)
+        piperesults.append(pipeparent)
 
     # start all the subprocesses
-    for subproc in subprocs:
-        subproc.start()
+    try:
+        for subproc in subprocs:
+            subproc.start()
 
-    # to keep track of the number of active subprocs
-    active = len(subprocs)
-    while active > 0:
-        result = q.get()
-        # we recieved a sentinel value to say that this chunk is complete
-        if result == SENTINEL:
-            active -= 1
-        else:
-            # note this will be out of order between subprocesses
-            # so we include the fkwargs for disambiguation by the caller if necessary
-            assert len(result) == 2, f"expected 2 got {len(result)}"
-            fkwargs, batch = result
-            for item in batch:
-                yield fkwargs, item
+        # as long as we are doing something
+        while len(subprocs):
+            # check which pipes have data in them
+            # process each result pipe in turn
+            for piperesult in multiprocessing.connection.wait(piperesults):
+                result = piperesult.recv()
 
-    # make sure all the subprocesses terminate tidily
-    # at this point we have recieved all the sentinels, so we should be fine
-    for subproc in subprocs:
-        subproc.join(1)
+                # we recieved a sentinel value to say that a chunk is complete
+                if result == SENTINEL:
+                    # this pipe can be closed now
+                    piperesult.close()
+                    i = piperesults.index(piperesult)
+                    piperesults.remove(piperesult)
+                    # also close the subproc
+                    subproc = subprocs[i]
+                    subproc.join(1)
+                    subprocs.remove(subproc)
+                else:
+                    # note this will be out of order between subprocesses
+                    # so we include the fkwargs for disambiguation by the caller if necessary
+                    assert len(result) == 2, f"expected 2 got {len(result)}"
+                    fkwargs, batch = result
+                    for item in batch:
+                        yield fkwargs, item
+
+        assert not len(piperesults), "unclosed pipes remaining"
+        assert not len(subprocs), "unterminated subprocesses remaining"
+    finally:
+        # ensure subprocs are cleaned up by joining
+        for subproc in subprocs:
+            subproc.join(1)
