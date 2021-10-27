@@ -1,5 +1,4 @@
 import gzip
-import itertools
 import logging
 import struct
 import zlib
@@ -495,7 +494,7 @@ class TabixIndexedFile:
 
         return self.fetch_bytes_virtual(virtual_start, virtual_end)
 
-    def fetch(self, name, start, end=None):
+    def fetch_lines(self, name, start, end=None):
         """
         Returns lines in the region of interest
         """
@@ -512,10 +511,6 @@ class TabixIndexedFile:
         # TODO ascii vs utf-8?
         lines = region.decode("ascii").splitlines()
 
-        # skip header lines defined in index
-        if self.index.headerlines_count:
-            lines = itertools.islice(lines, self.index.headerlines_count, None)
-
         # filter out comments
         lines = (line for line in lines if not line.startswith(self.index.meta))
 
@@ -530,27 +525,25 @@ class TabixIndexedFile:
                 self.index.column_end,
             )
         )
-
         # filter lines before start
-        lines = (
-            line
-            for line in lines
-            if int(line.split("\t")[self.index.column_begin - 1]) >= start
+        column_begin = self.index.column_begin
+        # default to using begin column again
+        column_end = (
+            self.index.column_end if self.index.column_end else self.index.column_begin
         )
 
-        # filter lines after end
-        if self.index.column_end:
-            # VCF doesnt need this
-            raise NotImplementedError()
-        else:
-            lines = (
-                line
-                for line in lines
-                if int(line.split("\t")[self.index.column_begin - 1]) <= end
-            )
+        lines = (
+            line for line in lines if int(line.split("\t")[column_begin - 1]) >= start
+        )
+        lines = (line for line in lines if int(line.split("\t")[column_end - 1]) <= end)
 
-        # return the lines as a text block
-        return "".join(lines)
+        return lines
+
+    def fetch(self, name, start, end=None):
+        """
+        Returns region of interest
+        """
+        return "\n".join(self.fetch_lines(name, start, end))
 
     def _read_block(self, offset):
         if offset is not None:
