@@ -61,9 +61,7 @@ def from_multiprocess_generator(
     # TODO wrap in conext manager for cleanup
     subprocs = []
     for i in range(len(genfunckwargs)):
-        pipeparent, pipechild = multiprocessing.Pipe(
-            duplex=True
-        )  # need duplex to flow from child to parent
+        pipeparent, pipechild = multiprocessing.Pipe()
         subproc = multiprocessing.Process(
             target=_multiprocess_generator_child,
             args=(
