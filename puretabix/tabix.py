@@ -1,14 +1,8 @@
 import gzip
 import logging
 import struct
-import zlib
 
-from .bgzip import (
-    check_is_block_gzip,
-    check_is_gzip,
-    generate_offset_lines,
-    get_file_ranged_decompressed,
-)
+from .bgzip import BlockGZipReader
 from .vcf import LINE_START, VCFAccumulator, get_vcf_fsm
 
 logger = logging.getLogger(__name__)
@@ -254,7 +248,7 @@ class TabixIndex:
                 outfile.write(struct.pack("<Q", ioff))
 
     @classmethod
-    def build_from(cls, vcffile):
+    def build_from(cls, rawfile):
         """
         read a vcf file in blockgzip format and create an index object for it
         """
@@ -279,93 +273,89 @@ class TabixIndex:
         bin_index = {}
         interval_index = {}
 
-        try:
-            for (
-                start_block,
-                start_offset,
-                end_block,
-                end_offset,
-                line,
-            ) in generate_offset_lines(vcffile):
-                if not line:
-                    continue
+        bgzipped = BlockGZipReader(rawfile)
+        bgzipped.seek(0)
 
-                vcf_fsm.run(line.decode() + "\n", LINE_START, accumulator)
-                vcf_line = accumulator.to_vcfline()
-                accumulator.reset()
-                # TODO add better debugging for unexpected lines
+        for (
+            start_block,
+            start_offset,
+            end_block,
+            end_offset,
+            line,
+        ) in bgzipped.generate_lines_offset():
+            line = line.decode() + "\n"
+            vcf_fsm.run(line, LINE_START, accumulator)
+            vcf_line = accumulator.to_vcfline()
+            accumulator.reset()
+            # TODO add better debugging for unexpected lines
 
-                # skip any comment lines with # or ##
-                if vcf_line.comment_raw or vcf_line.comment_key:
-                    continue
+            # skip any comment lines with # or ##
+            if vcf_line.comment_raw or vcf_line.comment_key:
+                continue
 
-                # have we started a new chromosome?
-                if vcf_line.chrom not in indexes:
-                    indexes[vcf_line.chrom] = ({}, [])
-                    bin_index = indexes[vcf_line.chrom][0]
-                    interval_index = indexes[vcf_line.chrom][1]
+            # have we started a new chromosome?
+            if vcf_line.chrom not in indexes:
+                indexes[vcf_line.chrom] = ({}, [])
+                bin_index = indexes[vcf_line.chrom][0]
+                interval_index = indexes[vcf_line.chrom][1]
 
-                # get the combined number for the block & offset
-                start_virtual = start_block << 16 | start_offset
-                end_virtual = end_block << 16 | end_offset
+            # get the combined number for the block & offset
+            start_virtual = start_block << 16 | start_offset
+            end_virtual = end_block << 16 | end_offset
 
-                # subtract 1 because its 0 offset
-                record_start = vcf_line.pos - 1
-                # subtract another 1 because half-open end
-                record_end = vcf_line.pos - 1 + len(vcf_line.ref) - 1
+            # subtract 1 because its 0 offset
+            record_start = vcf_line.pos - 1
+            # subtract another 1 because half-open end
+            record_end = vcf_line.pos - 1 + len(vcf_line.ref) - 1
 
-                # bin index
-                # smallest bin that completely contains the record
+            # bin index
+            # smallest bin that completely contains the record
 
-                bin_i = cls.region_to_bin(record_start, record_end)
+            bin_i = cls.region_to_bin(record_start, record_end)
 
-                if bin_i not in bin_index.keys():
-                    bin_index[bin_i] = [(start_virtual, end_virtual + 1)]
+            if bin_i not in bin_index.keys():
+                bin_index[bin_i] = [(start_virtual, end_virtual + 1)]
+            else:
+                # extend chunk if directly continuous
+                if bin_index[bin_i][-1][1] == start_virtual:
+                    bin_index[bin_i][-1] = (
+                        bin_index[bin_i][-1][0],
+                        end_virtual + 1,
+                    )
                 else:
-                    # extend chunk if directly continuous
-                    if bin_index[bin_i][-1][1] == start_virtual:
-                        bin_index[bin_i][-1] = (
-                            bin_index[bin_i][-1][0],
-                            end_virtual + 1,
-                        )
-                    else:
-                        bin_index[bin_i].append((start_virtual, end_virtual + 1))
+                    bin_index[bin_i].append((start_virtual, end_virtual + 1))
 
-                # interval index
-                # is the lowest virtual offset of all records that overlap interval
-                # half-closed half-open records
+            # interval index
+            # is the lowest virtual offset of all records that overlap interval
+            # half-closed half-open records
 
-                # throw away the first 14 bits to get interval index
-                # e.g. 0 => 0, 16384 => 1, etc
-                interval_i_start = record_start >> 14
-                # subtract another 1 because half-open end
-                interval_i_end = record_end >> 14
+            # throw away the first 14 bits to get interval index
+            # e.g. 0 => 0, 16384 => 1, etc
+            interval_i_start = record_start >> 14
+            # subtract another 1 because half-open end
+            interval_i_end = record_end >> 14
 
-                for linear_i in sorted(set((interval_i_start, interval_i_end))):
-                    # add any padding intervals
-                    while len(interval_index) <= linear_i:
-                        interval_index.append(-1)
+            for linear_i in sorted(set((interval_i_start, interval_i_end))):
+                # add any padding intervals
+                while len(interval_index) <= linear_i:
+                    interval_index.append(-1)
 
-                    # if there is no previous value, or the previous value was higher
-                    # replace previous value
-                    if (
-                        interval_index[linear_i] == -1
-                        or start_virtual < interval_index[linear_i]
-                    ):
-                        interval_index[linear_i] = start_virtual
+                # if there is no previous value, or the previous value was higher
+                # replace previous value
+                if (
+                    interval_index[linear_i] == -1
+                    or start_virtual < interval_index[linear_i]
+                ):
+                    interval_index[linear_i] = start_virtual
 
-                # pass through again and replace any -1 values with the last "not -1" value
-                # these are intervals with no overlapping records
-                lastgood = -1
-                for i in range(len(interval_index)):
-                    if interval_index[i] == -1:
-                        interval_index[i] = lastgood
-                    else:
-                        lastgood = interval_index[i]
-        except EOFError:
-            # if we reach the end of the file, ignore it because index will be complete
-            # TODO look for bgzip empty block instead
-            pass
+            # pass through again and replace any -1 values with the last "not -1" value
+            # these are intervals with no overlapping records
+            lastgood = -1
+            for i in range(len(interval_index)):
+                if interval_index[i] == -1:
+                    interval_index[i] = lastgood
+                else:
+                    lastgood = interval_index[i]
 
         return cls(
             file_format, column_sequence, column_begin, column_end, meta, 0, indexes
@@ -431,22 +421,35 @@ class TabixIndex:
 class TabixIndexedFile:
     def __init__(self, fileobj, index):
         self.index = index
-        self.fileobj = fileobj
-        # check fileobject is a real block-gzipped file
-        if not self.is_block_gzip():
-            raise ValueError("fileobj must be a block gzipped file-like object")
+        self.bgzipped = BlockGZipReader(fileobj)
 
     @staticmethod
     def from_files(fileobj, index_fileobj):
         return TabixIndexedFile(fileobj, TabixIndex.from_file(index_fileobj))
 
-    def is_gzip(self):
-        """is fileobj a valid gzip file?"""
-        return check_is_gzip(self.fileobj)
+    def fetch_bytes_block_offset(
+        self, block_start, offset_start, block_end, offset_end
+    ):
+        value = b""
+        self.bgzipped.seek(block_start)
+        block = block_start
+        while block <= block_end:
+            _, _, decompressed, _ = self.bgzipped.get_block()
+            # print(decompressed)
+            # empty block at end of file
+            if not decompressed:
+                break
 
-    def is_block_gzip(self):
-        """is fileobj is a valid block gzip file?"""
-        return check_is_block_gzip(self.fileobj)
+            if block == block_end:
+                # end block, drop beyond offset end
+                decompressed = decompressed[:offset_end]
+            if block == block_start:
+                # start block, drop before offset start
+                decompressed = decompressed[offset_start:]
+            value = value + decompressed
+            # update ready for next loop
+            block = self.bgzipped.tell()
+        return value
 
     def fetch_bytes_virtual(self, virtual_start, virtual_end):
         # the lower 16 bits store the offset of the byte inside the gzip block
@@ -458,20 +461,6 @@ class TabixIndexedFile:
         return self.fetch_bytes_block_offset(
             block_start, offset_start, block_end, offset_end
         )
-
-    def fetch_bytes_block_offset(
-        self, block_start, offset_start, block_end, offset_end
-    ):
-        value = b""
-        for start, _, _, decompressed, _ in get_file_ranged_decompressed(
-            self.fileobj, block_start, block_end + 1
-        ):
-            if start == block_end:
-                decompressed = decompressed[:offset_end]
-            if start == block_start:
-                decompressed = decompressed[offset_start:]
-            value = value + decompressed
-        return value
 
     def fetch_bytes(self, name, start, end=None):
         """
@@ -508,8 +497,7 @@ class TabixIndexedFile:
             return ""
 
         # turn the bytes into a list of strings
-        # TODO ascii vs utf-8?
-        lines = region.decode("ascii").splitlines()
+        lines = region.decode("utf-8").splitlines()
 
         # filter out comments
         lines = (line for line in lines if not line.startswith(self.index.meta))
@@ -531,7 +519,6 @@ class TabixIndexedFile:
         column_end = (
             self.index.column_end if self.index.column_end else self.index.column_begin
         )
-
         lines = (
             line for line in lines if int(line.split("\t")[column_begin - 1]) >= start
         )
@@ -544,33 +531,3 @@ class TabixIndexedFile:
         Returns region of interest
         """
         return "\n".join(self.fetch_lines(name, start, end))
-
-    def _read_block(self, offset):
-        if offset is not None:
-            # move the underlying file-like object to the right place
-            self.fileobj.seek(offset)
-        # read the first few bytes of the block from the source
-        # TODO validate this block
-        block_header = self.fileobj.read(18)
-        size = struct.unpack("<H", block_header[16:18])[0] + 1
-
-        # read the appropriate amount of content, excluding what has already been read
-        compressed_bytes = block_header + self.fileobj.read(size - 18)
-        if len(compressed_bytes) != size:
-            raise RuntimeError(
-                f"Unexpected number of bytes read. Got {len(compressed_bytes)}, expected {size}"
-            )
-
-        # decompress the content, which should be a complete and valid gzip file
-        decompressor = zlib.decompressobj(15 + 32)
-        uncompressed_bytes = decompressor.decompress(compressed_bytes)
-        if decompressor.unconsumed_tail:
-            raise RuntimeError(
-                f"Had unconsumed tail after decompressing of {len(decompressor.unconsumed_tail)}"
-            )
-        if decompressor.unused_data:
-            raise RuntimeError(
-                f"Had unused data after decompressing of {len(decompressor.unused_data)}"
-            )
-
-        return uncompressed_bytes, size

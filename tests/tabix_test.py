@@ -29,3 +29,8 @@ class TestBasic:
 
         fetched = indexed.fetch("22", 16042344)
         assert fetched == "", fetched
+
+    def test_index(self, vcf):
+        idx = puretabix.TabixIndex.build_from(vcf)
+        print(idx)
+        assert idx.indexes

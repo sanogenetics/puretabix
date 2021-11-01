@@ -3,6 +3,8 @@ import os
 
 import pytest
 
+from puretabix.bgzip import BlockGZipReader
+
 
 @pytest.fixture
 def vcf_filename():
@@ -30,3 +32,9 @@ def vcf_tbi(vcf_filename):
 def vcf_gz(vcf_filename):
     with gzip.open(vcf_filename, "rb") as vcf:
         yield vcf
+
+
+@pytest.fixture
+def vcf_bgzreader(vcf_filename):
+    with open(vcf_filename, "rb") as vcf:
+        yield BlockGZipReader(vcf)
