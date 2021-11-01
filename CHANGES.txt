@@ -1,3 +1,4 @@
+4.0.0, 2021/11/01 -- Use a more OO approach to multiprocessing and reading
 3.2.9, 2021/10/27 -- Add TabixIndexedFile.split_lines()
 3.1.2, 2021/10/25 -- Use multiprocess pipe not queue for AWS lambda compatibility
 3.1.1, 2021/10/20 -- Initial tabix index creation

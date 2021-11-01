@@ -13,7 +13,7 @@ about Tabix and the detailed file format specification.
 ```py
 from puretabix import TabixIndexedFile
 
-tabix_indexed_file = TabixIndexedFile(open('somefile.vcf.gz', 'rb'), open('somefile.vcf.gz.tbi', 'rb'))
+tabix_indexed_file = TabixIndexedFile.from_files(open('somefile.vcf.gz', 'rb'), open('somefile.vcf.gz.tbi', 'rb'))
 tabix_indexed_file.fetch("1", 1000, 5000)
 ```
 
