@@ -99,12 +99,12 @@ class MultiprocessGeneratorPool:
                     # an exception was raised in a worker
                     # reraise it in the parent
                     # pool as context manager will handle cleanup
-                    raise result[2]
+                    raise result[2] from result[2]
                 else:
                     # note this will be out of order between subprocesses
                     # so we include the fkwargs for disambiguation by the caller if necessary
-                    assert len(result) == 2, f"expected 2 got {result}"
-                    kwargs, batch = result
+                    assert len(result) == 3, f"expected 3 got {result}"
+                    kwargs, batch, _ = result
                     for item in batch:
                         yield kwargs, item
 
