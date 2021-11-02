@@ -95,6 +95,11 @@ class MultiprocessGeneratorPool:
                 # we recieved a sentinel value to say that a chunk is complete
                 if result == SENTINEL:
                     sentinelcount += 1
+                elif result[2]:
+                    # an exception was raised in a worker
+                    # reraise it in the parent
+                    # pool as context manager will handle cleanup
+                    raise result[2]
                 else:
                     # note this will be out of order between subprocesses
                     # so we include the fkwargs for disambiguation by the caller if necessary
@@ -118,13 +123,20 @@ class MultiprocessGeneratorPool:
                 func, batchsize, kwargs = msg
                 # start a fresh batch of results
                 batch = []
-                for result in func(**kwargs):
-                    batch.append(result)
-                    # batch is full, send it and start a new one
-                    if len(batch) >= batchsize:
-                        pipe.send([kwargs, batch])
-                        batch = []
-                # send any leftover lines smaller than a batch
-                pipe.send([kwargs, batch])
+                try:
+                    for result in func(**kwargs):
+                        batch.append(result)
+                        # batch is full, send it and start a new one
+                        if len(batch) >= batchsize:
+                            pipe.send([kwargs, batch, None])
+                            batch = []
+                except Exception as e:
+                    # if an error happened send it up
+                    pipe.send([kwargs, batch, e])
+                    # continue to the next arg
+                else:
+                    # no error was thrown
+                    # send any leftover lines smaller than a batch
+                    pipe.send([kwargs, batch, None])
                 # send a sentinel to say we've finished an arg
                 pipe.send(SENTINEL)
