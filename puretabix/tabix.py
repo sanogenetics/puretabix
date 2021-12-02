@@ -1,6 +1,7 @@
 import gzip
 import logging
 import struct
+from typing import Dict, Generator, Tuple
 
 from .bgzip import BlockGZipReader
 from .vcf import LINE_START, VCFAccumulator, get_vcf_fsm
@@ -419,37 +420,78 @@ class TabixIndex:
 
 
 class TabixIndexedFile:
-    def __init__(self, fileobj, index):
+    index: TabixIndex
+    bgzipped: BlockGZipReader
+    blockcache: Dict[int, Tuple[bytes, int]]
+    blockcachesize: int
+
+    def __init__(self, fileobj, index, blockcachesize=8192):
         self.index = index
         self.bgzipped = BlockGZipReader(fileobj)
+        self.blockcache = {}
+        self.blockcachesize = blockcachesize
 
     @staticmethod
     def from_files(fileobj, index_fileobj):
         return TabixIndexedFile(fileobj, TabixIndex.from_file(index_fileobj))
 
-    def fetch_bytes_block_offset(
-        self, block_start, offset_start, block_end, offset_end
-    ):
-        value = b""
+    def _get_block_cached(self, block):
+        # cache hit
+        if block in self.blockcache:
+            logger.debug(f"Cache hit {block}")
+            decompressed, pos = self.blockcache[block]
+            self.bgzipped.seek(pos)
+            return decompressed
+        # cache miss
+        logger.debug(f"Cache miss {block}")
+        if block != self.bgzipped.tell():
+            self.bgzipped.seek(block)
+        _, _, decompressed, _ = self.bgzipped.get_block()
+        # store in cache
+        self.blockcache[block] = (decompressed, self.bgzipped.tell())
+        # force max cache size
+        while len(self.blockcache) > self.blockcachesize:
+            todrop = tuple(self.blockcache.keys())[0]
+            logger.debug(f"Cache drop {todrop}")
+            del self.blockcache[todrop]
+        # return the data
+        return decompressed
+
+    def _gen_bytes_block_starts(
+        self, block_start: int, block_end: int
+    ) -> Generator[Tuple[int, bytes], None, None]:
         self.bgzipped.seek(block_start)
         block = block_start
         while block <= block_end:
-            _, _, decompressed, _ = self.bgzipped.get_block()
+            decompressed = self._get_block_cached(block)
             # print(decompressed)
             # empty block at end of file
             if not decompressed:
                 break
+            yield (block, decompressed)
+            # update ready for next loop
+            block = self.bgzipped.tell()
 
+    def _gen_bytes_block_offset(self, block_start, offset_start, block_end, offset_end):
+        for block, decompressed in self._gen_bytes_block_starts(block_start, block_end):
             if block == block_end:
                 # end block, drop beyond offset end
                 decompressed = decompressed[:offset_end]
             if block == block_start:
                 # start block, drop before offset start
                 decompressed = decompressed[offset_start:]
-            value = value + decompressed
+            yield decompressed
             # update ready for next loop
             block = self.bgzipped.tell()
-        return value
+
+    def fetch_bytes_block_offset(
+        self, block_start, offset_start, block_end, offset_end
+    ):
+        return b"".join(
+            self._gen_bytes_block_offset(
+                block_start, offset_start, block_end, offset_end
+            )
+        )
 
     def fetch_bytes_virtual(self, virtual_start, virtual_end):
         # the lower 16 bits store the offset of the byte inside the gzip block
