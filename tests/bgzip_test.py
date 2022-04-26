@@ -6,22 +6,23 @@ from puretabix.bgzip import BlockGZipWriter
 
 class TestBlockGZip:
     def test_get_lines(self, vcf_bgzreader, vcf_gz):
-        lines = tuple(sorted(map(bytes.decode, vcf_gz.readlines())))
-        print(f"read {len(lines)} linesfor testing")
+        validate_lines = []
+        for line in vcf_gz.readlines():
+            if line:
+                validate_lines.append(line)
+        validate_lines = tuple(sorted(validate_lines))
+        print(f"read {len(validate_lines)} lines for testing")
 
         vcf_bgzreader.seek(0)
-        try:
-            lines_parsed = tuple(sorted(vcf_bgzreader.generate_lines()))
-        except EOFError:
-            print("caught EOF")
+        lines_parsed = tuple(sorted(vcf_bgzreader.generate_lines()))
         print(f"read {len(lines_parsed)} lines")
 
-        assert len(lines) == len(lines_parsed)
+        assert len(validate_lines) == len(lines_parsed)
 
-        for line_in, line_out in zip(lines, lines_parsed):
+        for line_in, line_out in zip(validate_lines, lines_parsed):
             print(line_in, line_out)
-            line_in = line_in.strip()
-            line_out = line_out.decode()
+            line_in = line_in
+            line_out = line_out
             assert line_in == line_out, (line_in, line_out)
 
     def test_write_bgzip(self, vcf_bgzreader, vcf_gz):
@@ -37,6 +38,6 @@ class TestBlockGZip:
 
             for line_in, line_out in zip(lines, lines_parsed):
                 print(line_in, line_out)
-                line_in = line_in.strip()
+                line_in = line_in
                 line_out = line_out.decode()
                 assert line_in == line_out, (line_in, line_out)
