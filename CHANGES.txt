@@ -1,4 +1,4 @@
-5.0.0, 2021/12/24 -- Keep line endings when a block is split
+5.0.0, 2022/04/26 -- Keep line endings when a block is split
 4.0.3, 2022/04/26 -- Handle more ID characters
 4.0.2, 2021/11/02 -- Fix handling exceptions in child processes better
 4.0.1, 2021/11/02 -- Handle exceptions in child processes better
