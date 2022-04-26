@@ -355,7 +355,7 @@ def get_vcf_fsm():
     )
     fsm_vcf.add_transition(POS, ID, SetInTransition, "\t", VCFAccumulator.pos_to_id)
     fsm_vcf.add_transition(
-        ID, ID, RegexTransition, r"[a-zA-Z0-9.]", VCFAccumulator.append_character
+        ID, ID, RegexTransition, r"\S", VCFAccumulator.append_character
     )
     fsm_vcf.add_transition(ID, ID, SetInTransition, ";", VCFAccumulator.id_to_ref)
     fsm_vcf.add_transition(ID, REF, SetInTransition, "\t", VCFAccumulator.id_to_ref)
