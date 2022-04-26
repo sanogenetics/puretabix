@@ -37,4 +37,6 @@ def vcf_gz(vcf_filename):
 @pytest.fixture
 def vcf_bgzreader(vcf_filename):
     with open(vcf_filename, "rb") as vcf:
-        yield BlockGZipReader(vcf)
+        reader = BlockGZipReader(vcf)
+        vcf.seek(0)
+        yield reader

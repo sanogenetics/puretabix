@@ -167,7 +167,8 @@ class BlockGZipReader:
         if len(decompressed) == 0:
             return header, cdata, decompressed, b"", (), b"", tail
 
-        decompressedlines = decompressed.splitlines()
+        # line endings can abut block ending so keep them
+        decompressedlines = decompressed.splitlines(keepends=True)
         if start == 0:
             # first block has no partial start line
             firstline = b""
@@ -332,12 +333,22 @@ class BlockGZipReader:
                 # append holdover partial line to initial line to make a new line
                 lines = (partialline + firstline,) + lines
                 # keep the last partial line for next block
-                partialline = lastline
+                # last block ended on a line ending no rollover needed
+                if lastline.endswith(b"\n"):
+                    blockstarts = blockstarts + (blockstart,)
+                    blockends = blockends + (blockstart,)
+                    offsetstarts = offsetstarts + (offsetends[-1],)
+                    offsetends = offsetends + (offsetends[-1] + len(lastline),)
+                    lines = lines + (lastline,)
+                    partialline = b""
+                else:
+                    partialline = lastline
 
             for line, start_block, start_offset, end_block, end_offset in zip(
                 lines, blockstarts, offsetstarts, blockends, offsetends
             ):
-                yield start_block, start_offset, end_block, end_offset, line
+                if line:
+                    yield start_block, start_offset, end_block, end_offset, line
 
             # prepare to do next block
             blockstart_previous = blockstart
