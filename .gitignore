@@ -2,7 +2,7 @@ __pycache__
 *.pyc
 *.pyo
 *.pyd
-venv
+venv*/
 .coverage
 .coverage.*
 *.log
@@ -11,3 +11,4 @@ venv
 dist
 test-reports/
 tests/perf_test.txt
+.DS_store

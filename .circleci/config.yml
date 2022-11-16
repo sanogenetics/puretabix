@@ -4,9 +4,9 @@
 #
 version: 2.1
 jobs:
-  build:
+  test:
     docker:
-      - image: circleci/python:3.8.3
+      - image: << parameters.image >>
     steps:
       - checkout
       - run:
@@ -24,3 +24,11 @@ jobs:
       - store_test_results:
           # must be a directory with named subdirectories
           path: test-reports
+
+workflows:
+  all-tests:
+    jobs:
+      - test:
+          matrix:
+            parameters:
+              image: ["circleci/python:3.8.9", "circleci/python:3.9.9", "circleci/python:3.10.1"]
