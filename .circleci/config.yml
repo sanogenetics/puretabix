@@ -23,7 +23,7 @@ jobs:
           command: |
             pytest tests/ -s --cov --cov-report xml:test-reports/coverage.xml --junitxml test-reports/pytest/tests.xml
             coverage report -m
-            bash <(curl -s https://codecov.io/bash)
+            if [[ "<< parameters.image >>" == "circleci/python:3.8.9" ]] ; then bash <(curl -s https://codecov.io/bash) ; fi
       - store_test_results:
           # must be a directory with named subdirectories
           path: test-reports
