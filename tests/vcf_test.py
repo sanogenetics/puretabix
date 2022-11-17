@@ -1,5 +1,4 @@
-import puretabix
-from puretabix.vcf import VCFLine
+from puretabix.vcf import VCFLine, read_vcf_lines
 
 
 class TestVCFLineConstructors:
@@ -22,16 +21,7 @@ class TestVCFLineConstructors:
 class TestVCFFSM:
     def test_dbsnp(self, vcf_gz):
         lines = tuple(map(bytes.decode, vcf_gz.readlines()))
-        vcf_fsm = puretabix.vcf.get_vcf_fsm()
-
-        accumulator = puretabix.vcf.VCFAccumulator()
-        lines_parsed = []
-        for line in lines:
-            vcf_fsm.run(line, puretabix.vcf.LINE_START, accumulator)
-            vcfline = accumulator.to_vcfline()
-            accumulator.reset()
-            line_parsed = str(vcfline)
-            lines_parsed.append(line_parsed)
+        lines_parsed = read_vcf_lines(lines)
 
         for line_in, line_out in zip(lines, lines_parsed):
             print(line_in, line_out)
