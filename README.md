@@ -17,6 +17,75 @@ tabix_indexed_file = TabixIndexedFile.from_files(open('somefile.vcf.gz', 'rb'), 
 tabix_indexed_file.fetch("1", 1000, 5000)
 ```
 
+Documentation is supported via Python built-in module [PyDoc](https://docs.python.org/3/library/pydoc.html): `python3 -m pydoc -b puretabix`
+
+VCF
+---
+
+Included in this package is tooling for reading and writing VCF lines.
+
+To read a file:
+
+```python
+from puretabix.vcf import read_vcf_lines
+
+with open("source.vcf") as input:
+    for vcfline in read_vcf_lines(input):
+        if vcfline.comment_raw:
+            # its a comment or meta-information
+            pass
+        else:
+            # access the parsed information
+            if "PASS" not in vcfline._filter:
+                print(f"{vcfline.chrom} {vcfline.pos}")
+```
+
+To write some lines:
+
+```python
+from puretabix.vcf import VCFLine
+
+with open("output.vcf") as output:
+    output.write(str(VCFLine.as_comment_key_dict("fileformat", "VCFv4.2")))
+    output.write("\n")
+    output.write(
+        str(
+            VCFLine.as_comment_raw(
+                "\t".join(
+                    (
+                        "CHROM",
+                        "POS",
+                        "ID",
+                        "REF",
+                        "ALT",
+                        "QUAL",
+                        "FILTER",
+                        "INFO",
+                        "FORMAT",
+                        "SAMPLE",
+                    )
+                )
+            )
+        )
+    )
+    output.write("\n")
+    output.write(
+        str(
+            VCFLine.as_data(
+                "chr1",
+                123,
+                ("rs123",),
+                "A",
+                ("C",),
+                ".",
+                ("PASS",),
+                {},
+                ({"GT": "1/0"},),
+            )
+        )
+    )
+    output.write("\n")
+```
 
 development
 -----------

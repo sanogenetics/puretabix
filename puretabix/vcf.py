@@ -1,3 +1,5 @@
+from typing import Dict, Generator, Iterable, Optional, Tuple
+
 from .fsm import (
     FSMachine,
     RegexTransition,
@@ -7,6 +9,48 @@ from .fsm import (
 
 
 class VCFLine:
+    """
+    Representation of a single VCF line.
+
+    Comment lines (starting #) will have:
+      comment_raw
+
+    Meta-information (starting ##) are comments lines and will also have
+      comment_key
+      comment_value_str
+      comment_value_dict
+
+    Data lines will have:
+        chrom       VCF CHROM
+        pos         VCF POS
+        _id         VCF IDs (if any)
+        ref         VCF REF
+        alt         VCF ALTs (if any)
+        qual        floating point representation of VCF QUAL (if possible)
+        qual_str    raw string representation of VCF QUAL
+        _filter     VCF FILTERs (if any)
+        info        VCF INFO as a dictionary
+
+    Data lines may have:
+        sample      Iterable of dictionaries for the samples
+
+    For output, a VCFLine can be converted to a string.
+    """
+
+    comment_raw: str  # non-empty if line starts with #
+    comment_key: str  # non-empty if line starts with ##
+    comment_value_str: str  # non-empty if line starts with ##
+    comment_value_dict: Dict[str, str]
+    chrom: str
+    pos: int
+    _id: Tuple[str]
+    ref: str
+    alt: Tuple[str]
+    qual: Optional[float]
+    qual_str: str
+    _filter: Tuple[str]
+    info: Dict[str, str]
+    sample: Tuple[Dict[str, str]]
 
     __slots__ = (
         "comment_raw",
@@ -30,31 +74,32 @@ class VCFLine:
         comment_raw: str,
         comment_key: str,
         comment_value_str: str,
-        comment_value_dict,
+        comment_value_dict: Dict[str, str],
         chrom: str,
         pos: int,
-        _id,
+        _id: Iterable[str],
         ref: str,
-        alt,
+        alt: Iterable[str],
         qual_str: str,
-        _filter,
-        info,
-        sample,
+        _filter: Iterable[str],
+        info: Dict[str, str],
+        sample: Iterable[Dict[str, str]],
     ):
+        # TODO validation of permitted characters
         self.comment_raw = comment_raw
         self.comment_key = comment_key
         self.comment_value_str = comment_value_str
         self.comment_value_dict = comment_value_dict
         self.chrom = chrom
         self.pos = pos
-        self._id = _id
+        self._id = tuple(_id)
         self.ref = ref
-        self.alt = alt
+        self.alt = tuple(alt)
         self.qual_str = qual_str
-        self._filter = _filter
+        self._filter = tuple(_filter)
         self.info = info
         # this may be zero to many
-        self.sample = sample
+        self.sample = tuple(sample)
 
         try:
             self.qual = float(qual_str)
@@ -63,13 +108,17 @@ class VCFLine:
             # value will be None but original in qual_str
             self.qual = None
 
-    def __str__(self):
+    def __str__(self) -> str:
         # CHROM POS ID REF ALT QUAL FILTER INFO (FORMAT) (SAMPLE) (SAMPLE) ...
         if self.comment_raw:
             return "#" + self.comment_raw
         elif self.comment_key and self.comment_value_str:
+            # meta information line
+            # ##fileformat=VCFv4.2
             return "".join(("##", self.comment_key, "=", self.comment_value_str))
         elif self.comment_key and self.comment_value_dict:
+            # meta information line
+            # ##FILTER=<ID=ID,Description="description">
             return "".join(
                 (
                     "##",
@@ -85,6 +134,7 @@ class VCFLine:
                 )
             )
         else:
+            # data line
             required = "\t".join(
                 (
                     self.chrom,
@@ -106,16 +156,27 @@ class VCFLine:
             if not self.sample:
                 return required
             else:
-                sample_keys = ":".join(self.sample[0].keys())
+                # get the superset of all keys of all samples
+                keyset = set()
+                keylist = []
+                for sample in self.sample:
+                    for key in sample.keys():
+                        if key not in keyset:
+                            keylist.append(key)
+                            keyset.add(key)
+                sample_keys = ":".join(keylist)
                 line = "\t".join((required, sample_keys))
 
+                # get the values for each key in superset or .
                 for sample in self.sample:
-                    sample_values = ":".join(sample.values())
-                    line = line + "\t" + sample_values
+                    values = []
+                    for key in keylist:
+                        values.append(sample.get(key, "."))
+                    line = line + "\t" + ":".join(values)
                 return line
 
     @classmethod
-    def as_comment_raw(cls, comment_raw):
+    def as_comment_raw(cls, comment_raw: str) -> "VCFLine":
         return cls(
             comment_raw,
             comment_key="",
@@ -133,7 +194,7 @@ class VCFLine:
         )
 
     @classmethod
-    def as_comment_key_string(cls, key, value_str):
+    def as_comment_key_string(cls, key: str, value_str: str) -> "VCFLine":
         # for example ##fileformat=VCFv4.3
         return cls(
             comment_raw="",
@@ -152,7 +213,7 @@ class VCFLine:
         )
 
     @classmethod
-    def as_comment_key_dict(cls, key, value_dict):
+    def as_comment_key_dict(cls, key: str, value_dict: Dict[str, str]) -> "VCFLine":
         # for example
         # ##INFO=<ID=ID,Number=number,Type=type,Description="description",Source="source",Version="version">
         return cls(
@@ -169,6 +230,35 @@ class VCFLine:
             _filter="",
             info={},
             sample=[],
+        )
+
+    @classmethod
+    def as_data(
+        cls,
+        chrom: str,
+        pos: int,
+        _id: Iterable[str],
+        ref: str,
+        alt: Iterable[str],
+        qual_str: str,
+        _filter: Iterable[str],
+        info: Dict[str, str],
+        sample: Iterable[Dict[str, str]],
+    ):
+        return cls(
+            comment_raw="",
+            comment_key="",
+            comment_value_str="",
+            comment_value_dict={},
+            chrom=chrom,
+            pos=pos,
+            _id=_id,
+            ref=ref,
+            alt=alt,
+            qual_str=qual_str,
+            _filter=_filter,
+            info=info,
+            sample=sample,
         )
 
 
@@ -544,3 +634,16 @@ def get_vcf_fsm():
     )
 
     return fsm_vcf
+
+
+def read_vcf_lines(input: Iterable[str]) -> Generator[VCFLine, None, None]:
+    """
+    Convenience function for parsing a source of VCF lines
+    """
+    vcf_fsm = get_vcf_fsm()
+    accumulator = VCFAccumulator()
+    for line in input:
+        vcf_fsm.run(line, LINE_START, accumulator)
+        vcfline = accumulator.to_vcfline()
+        accumulator.reset()
+        yield vcfline
