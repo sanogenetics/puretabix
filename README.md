@@ -112,6 +112,11 @@ Global git ignores per https://help.github.com/en/github/using-git/ignoring-file
 
 For release to PyPI see https://packaging.python.org/tutorials/packaging-projects/
 ```sh
+git add setup.py CHANGES.txt
+git commit -m"prepare for x.x.x"
+git push
+git tag x.x.x
+git push origin x.x.x
 python3 setup.py sdist && python3 -m twine upload dist/*
 ```
 

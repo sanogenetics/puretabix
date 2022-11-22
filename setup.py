@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="puretabix",
-    version="5.1.0",
+    version="5.2.0",
     author="Adam Faulconbridge",
     author_email="afaulconbridge@googlemail.com",
     packages=["puretabix"],
