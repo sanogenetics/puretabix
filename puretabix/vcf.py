@@ -15,7 +15,7 @@ class VCFLine:
     Comment lines (starting #) will have:
       comment_raw
 
-    Meta-information (starting ##) are comments lines and will also have
+    Meta-information (starting ##) will have
       comment_key
       comment_value_str
       comment_value_dict
@@ -35,6 +35,11 @@ class VCFLine:
         sample      Iterable of dictionaries for the samples
 
     For output, a VCFLine can be converted to a string.
+
+    For convenience, several additional features exist
+
+        is_comment  checks if either comment_raw or comment_key is defined
+        get_gt()    returns the ref and/or alt alleles for each sample as a tuple of tuples of strings
     """
 
     comment_raw: str  # non-empty if line starts with #
@@ -174,6 +179,30 @@ class VCFLine:
                         values.append(sample.get(key, "."))
                     line = line + "\t" + ":".join(values)
                 return line
+
+    @property
+    def is_comment(self) -> bool:
+        return bool(self.comment_raw or self.comment_key)
+
+    def get_genotype(self) -> Tuple[Tuple[str, ...], ...]:
+        """
+        Convenience function to get the GT of each sample, and use that to match the allels in ref & alt.
+
+        Returns a tuple of strings.
+        """
+        if self.is_comment:
+            raise ValueError("Cannot get_gt() of a comment")
+
+        result = [tuple() for _ in range(len(self.sample))]
+        refalt = (self.ref,) + self.alt
+        for i, sample in enumerate(self.sample):
+            if "GT" in sample:
+                # split into separate alleles
+                allele_pos = sample["GT"].replace("|", "/").split("/")
+                # for each allele either keep a dot or do ref+alt lookup
+                alleles = [i if i == "." else refalt[int(i)] for i in allele_pos]
+                result[i] = tuple(alleles)
+        return tuple(result)
 
     @classmethod
     def as_comment_raw(cls, comment_raw: str) -> "VCFLine":

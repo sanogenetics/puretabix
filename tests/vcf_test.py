@@ -24,7 +24,18 @@ class TestVCFFSM:
         lines_parsed = read_vcf_lines(lines)
 
         for line_in, line_out in zip(lines, lines_parsed):
-            print(line_in, line_out)
             line_in = line_in.strip()
-            line_out = str(line_out)
-            assert line_in == line_out, (line_in, line_out)
+            print(line_in)
+            print(str(line_out).strip())
+            assert line_in == str(line_out), (line_in, line_out)
+
+    def test_dbsnp_gt(self, vcf_gz):
+        lines = tuple(map(bytes.decode, vcf_gz.readlines()))
+        lines_parsed = read_vcf_lines(lines)
+
+        for line_in, line_out in zip(lines, lines_parsed):
+            line_in = line_in.strip()
+            print(line_in)
+            print(str(line_out).strip())
+            if not line_out.is_comment:
+                assert line_out.get_genotype()

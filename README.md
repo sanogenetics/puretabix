@@ -31,13 +31,13 @@ from puretabix.vcf import read_vcf_lines
 
 with open("source.vcf") as input:
     for vcfline in read_vcf_lines(input):
-        if vcfline.comment_raw:
+        if vcfline.is_comment:
             # its a comment or meta-information
             pass
         else:
             # access the parsed information
             if "PASS" not in vcfline._filter:
-                print(f"{vcfline.chrom} {vcfline.pos}")
+                print(f"{vcfline.chrom} {vcfline.pos} {vcfline.get_genotype()}")
 ```
 
 To write some lines:
