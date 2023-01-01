@@ -7,7 +7,7 @@ It is *not* run as a unit test
 """
 import os
 
-import puretabix
+from puretabix.tabix import TabixIndexedVCFFile
 
 if __name__ == "__main__":
     targets = (
@@ -126,13 +126,19 @@ if __name__ == "__main__":
         )
         with open(pth, "rb") as vcf_tbi:
 
+            # do it 100 times for profiling
             for _ in range(100):
-                indexed = puretabix.TabixIndexedFile.from_files(vcf, vcf_tbi)
+                indexed = TabixIndexedVCFFile.from_files(vcf, vcf_tbi)
 
                 # fetched = indexed.fetch("1", 1108138 - 10, 1108138 + 10)
                 # fetched = indexed.fetch("1", 1108138)
 
                 for chrom, pos in targets:
-                    pos = int(pos)
-                    fetched = indexed.fetch(chrom, pos)
-                    print(fetched)
+                    # fetched = indexed.fetch(chrom, pos)
+                    fetched = indexed.fetch_vcf_lines(chrom, pos)
+                    assert fetched
+                    # print(fetched)
+
+                # move file back to start
+                vcf.seek(0)
+                vcf_tbi.seek(0)
