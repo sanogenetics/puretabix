@@ -573,7 +573,11 @@ def get_vcf_fsm():
         FORMAT, SAMPLE, SetInTransition, "\t", VCFAccumulator.format_to_sample
     )
     fsm_vcf.add_transition(
-        SAMPLE, SAMPLE, SetNotInTransition, "\t\n", VCFAccumulator.append_character
+        SAMPLE,
+        SAMPLE,
+        SetNotInTransition,
+        ("\t", "\n", None),
+        VCFAccumulator.append_character,
     )
     fsm_vcf.add_transition(
         SAMPLE, SAMPLE, SetInTransition, "\t", VCFAccumulator.sample_to_sample
@@ -583,7 +587,11 @@ def get_vcf_fsm():
     )
     fsm_vcf.add_transition(LINE_START, COMMENT, SetInTransition, "#", None)
     fsm_vcf.add_transition(
-        COMMENT, COMMENT, SetNotInTransition, "#\n", VCFAccumulator.append_character
+        COMMENT,
+        COMMENT,
+        SetNotInTransition,
+        ("#", "\n", None),
+        VCFAccumulator.append_character,
     )
     fsm_vcf.add_transition(
         COMMENT, None, SetInTransition, ("\n", None), VCFAccumulator.end_comment
@@ -691,7 +699,8 @@ def read_vcf_lines(input: Iterable[str]) -> Generator[VCFLine, None, None]:
     vcf_fsm = get_vcf_fsm()
     accumulator = VCFAccumulator()
     for line in input:
-        vcf_fsm.run(line, LINE_START, accumulator)
-        vcfline = accumulator.to_vcfline()
-        accumulator.reset()
-        yield vcfline
+        if line:
+            vcf_fsm.run(line, LINE_START, accumulator)
+            vcfline = accumulator.to_vcfline()
+            accumulator.reset()
+            yield vcfline

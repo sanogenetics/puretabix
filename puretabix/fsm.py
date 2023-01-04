@@ -80,13 +80,14 @@ class FSMachine:
             self.process_next(c, args, kwargs)
             # if state is None, early exit
             if not self.current_state:
-                return
+                break
 
-        if not self.current_state:
-            # process that we reached the end of the input
+        # process that we reached the end of the input
+        if self.current_state:
             self.process_next(None, args, kwargs)
-        else:
-            logger.warning(f"Unexpected ending at {self.current_state} in {input}")
+
+        # check at a valid end state
+        assert not self.current_state, f"Unexpected ending at {self.current_state}"
 
     def process_next(self, _input, callback_args, callback_kwargs):
         frozen_state = self.current_state

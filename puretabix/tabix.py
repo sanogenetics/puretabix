@@ -572,7 +572,6 @@ class TabixIndexedVCFFile(TabixIndexedFile):
             vcfline = self.accumulator.to_vcfline()
             self.accumulator.reset()
             if (
-                vcfline.pos >= start  # after start
-                and vcfline.pos + len(vcfline.ref) - 1 <= end  # before end
-            ):
+                vcfline.pos >= start and vcfline.pos <= end
+            ):  # after start and before end
                 yield vcfline
