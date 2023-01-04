@@ -86,6 +86,22 @@ with open("output.vcf") as output:
     )
     output.write("\n")
 ```
+VCF with index
+--------------
+
+If there is a tabix index for a block gzipped VCF file, that index can be used for fast random access
+
+```python
+import puretabix
+
+with open("input.vcf.gz", "rb") as vcf:
+    with open("input.vcf.gz.tbi", "rb") as vcf_tbi:
+        indexed = puretabix.TabixIndexedVCFFile.from_files(vcf, vcf_tbi)
+        vcfline = tuple(indexed.fetch_vcf_lines("chr1", 1108138))
+        assert vcfline.chrom == "chr1"
+        assert vcfline.pos == 1108138
+        print(f"gt = {vcfline.get_genotype()}")
+```
 
 development
 -----------
@@ -111,7 +127,10 @@ scalene --outfile tests/perf_test.txt --profile-all --cpu-sampling-rate 0.0001 t
 Global git ignores per https://help.github.com/en/github/using-git/ignoring-files#configuring-ignored-files-for-all-repositories-on-your-computer
 
 For release to PyPI see https://packaging.python.org/tutorials/packaging-projects/
+
 ```sh
+git checkout master
+git pull
 git add setup.py CHANGES.txt
 git commit -m"prepare for x.x.x"
 git push

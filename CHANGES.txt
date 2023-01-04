@@ -1,3 +1,4 @@
+5.3.0, 2023/01/04 -- Improve indexed VCF convenience and speed
 5.2.0, 2022/11/21 -- Add VCF convenience functions
 5.1.0, 2022/11/17 -- Improve VCF documentation, add VCF data line constructor
 5.0.0, 2022/04/26 -- Keep line endings when a block is split
