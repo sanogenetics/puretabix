@@ -537,9 +537,11 @@ class TabixIndexedFile:
         return (
             line
             for line, line_split in lines_split
-            if len(line_split) >= expected_len  # right length
-            and int(line_split[column_begin - 1]) >= start  # after start
-            and int(line_split[column_end - 1]) <= end  # before end
+            if (
+                len(line_split) >= expected_len  # right length
+                and int(line_split[column_begin - 1]) >= start  # after start
+                and int(line_split[column_end - 1]) <= end  # before end
+            )
         )
 
     def fetch(self, name: str, start: int, end: Union[None, int] = None) -> str:
@@ -559,10 +561,18 @@ class TabixIndexedVCFFile(TabixIndexedFile):
         self.accumulator = VCFAccumulator()
 
     def fetch_vcf_lines(
-        self, name: str, start: int, end: Union[None, int]
+        self, name: str, start: int, end: Union[None, int] = None
     ) -> Generator[VCFLine, None, None]:
+        # default if only start specified
+        if not end:
+            end = start
+
         for line in self.fetch_bytes(name, start, end).decode("utf-8").splitlines():
             self.vcf_fsm.run(line, LINE_START, self.accumulator)
             vcfline = self.accumulator.to_vcfline()
             self.accumulator.reset()
-            yield vcfline
+            if (
+                vcfline.pos >= start  # after start
+                and vcfline.pos + len(vcfline.ref) - 1 <= end  # before end
+            ):
+                yield vcfline

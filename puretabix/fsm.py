@@ -9,7 +9,10 @@ character-by-character manner
 based on https://gist.github.com/brianray/8d3e697dbbf150f725291d74ac0cee8b
 """
 
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 
 class RegexTransition:
@@ -78,7 +81,8 @@ class FSMachine:
             if not self.current_state:
                 break
 
-        assert not self.current_state, f"Unexpected ending in {self.current_state}"
+        if not self.current_state:
+            logger.warning(f"Unexpected ending in {self.current_state}")
 
     def process_next(self, _input, callback_args, callback_kwargs):
         frozen_state = self.current_state

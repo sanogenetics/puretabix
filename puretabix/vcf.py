@@ -180,6 +180,9 @@ class VCFLine:
                     line = line + "\t" + ":".join(values)
                 return line
 
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.comment_raw},{self.comment_key},{self.comment_value_str},{self.comment_value_dict},{self.chrom},{self.pos},{self._id},{self.ref},{self.alt},{self.qual_str},{self._filter},{self.info},{self.sample})"
+
     @property
     def is_comment(self) -> bool:
         return bool(self.comment_raw or self.comment_key)

@@ -13,6 +13,17 @@ class TestBasic:
         assert len(fetched.strip().split("\n")) == 1, fetched
         assert "rs61733845" in fetched, fetched
 
+    def test_vcf(self, vcf, vcf_tbi):
+        indexed = puretabix.TabixIndexedVCFFile.from_files(vcf, vcf_tbi)
+
+        fetched = tuple(indexed.fetch_vcf_lines("1", 1108138))
+        assert len(fetched) == 1, fetched
+        assert "rs61733845" in fetched[0]._id, fetched
+
+        fetched = tuple(indexed.fetch_vcf_lines("1", 1108138 - 10, 1108138 + 10))
+        assert len(fetched) == 1, fetched
+        assert "rs61733845" in fetched[0]._id, fetched
+
     def test_beyond_end(self, vcf, vcf_tbi):
         indexed = puretabix.TabixIndexedFile.from_files(vcf, vcf_tbi)
         fetched = indexed.fetch("1", 245804116 + 1)
