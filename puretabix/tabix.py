@@ -1,9 +1,12 @@
 import gzip
 import logging
 import struct
+from typing import Dict, Generator, Tuple, Union
+
+from puretabix.fsm import FSMachine
 
 from .bgzip import BlockGZipReader
-from .vcf import LINE_START, VCFAccumulator, get_vcf_fsm
+from .vcf import LINE_START, VCFAccumulator, VCFLine, get_vcf_fsm
 
 logger = logging.getLogger(__name__)
 
@@ -11,13 +14,13 @@ logger = logging.getLogger(__name__)
 class TabixIndex:
     def __init__(
         self,
-        file_format,
-        column_sequence,
-        column_begin,
-        column_end,
-        meta,
-        headerlines_count,
-        indexes,
+        file_format: int,
+        column_sequence: int,
+        column_begin: int,
+        column_end: int,
+        meta: str,
+        headerlines_count: int,
+        indexes: Dict[str, Tuple[Dict[int, Tuple[Tuple[int, int]]], Tuple[int, ...]]],
     ):
         """
         In-memory representation of a Tabix index. See https://samtools.github.io/hts-specs/tabix.pdf
@@ -44,7 +47,7 @@ class TabixIndex:
         self.indexes = indexes
 
     @classmethod
-    def from_file(cls, fileobj):
+    def from_file(cls, fileobj) -> "TabixIndex":
         """
         Generally these are pretty small files that need to be read entirely, thus downloading them
         locally before processing is recommented e.g. io.BytesIO
@@ -134,10 +137,10 @@ class TabixIndex:
             indexes,
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"TabixIndex({self.file_format}, {self.column_sequence}, {self.column_begin}, {self.column_end}, {self.meta}, {self.headerlines_count}, {self.indexes})"
 
-    def _lookup_linear(self, sequence_name, start):
+    def _lookup_linear(self, sequence_name: str, start: int) -> Union[None, int]:
         """
         For each tiling 16 kb window keep the virtual file offset of the leftmost record (i.e.
         having the smallest start coordinate) that overlaps the window.
@@ -159,7 +162,9 @@ class TabixIndex:
         # its a valid sequnce name and a valid interval window
         return linear_index[i]
 
-    def _lookup_bin_chunks(self, sequence_name, start, end):
+    def _lookup_bin_chunks(
+        self, sequence_name: str, start: int, end: int
+    ) -> Generator[Tuple[int, int], None, None]:
         """
         Records are assigned to a bin if the entirely fit in the bin.
         So we want all the records in all the bins that overlap with the region of interest.
@@ -171,7 +176,9 @@ class TabixIndex:
                 for chunk in bin_index[chunks_bin_index]:
                     yield chunk
 
-    def lookup_virtual(self, sequence_name, start, end):
+    def lookup_virtual(
+        self, sequence_name: str, start: int, end: int
+    ) -> Union[Tuple[None, None], Tuple[int, int]]:
         virtual_start = None
         virtual_end = None
 
@@ -248,7 +255,7 @@ class TabixIndex:
                 outfile.write(struct.pack("<Q", ioff))
 
     @classmethod
-    def build_from(cls, rawfile):
+    def build_from(cls, rawfile) -> "TabixIndex":
         """
         read a vcf file in blockgzip format and create an index object for it
         """
@@ -271,7 +278,7 @@ class TabixIndex:
 
         # these are the internal two index types
         bin_index = {}
-        interval_index = {}
+        interval_index = []
 
         bgzipped = BlockGZipReader(rawfile)
         bgzipped.seek(0)
@@ -362,7 +369,9 @@ class TabixIndex:
         )
 
     @staticmethod
-    def region_to_bins(begin, end, n_levels=5, min_shift=14):
+    def region_to_bins(
+        begin: int, end: int, n_levels: int = 5, min_shift: int = 14
+    ) -> Generator[int, None, None]:
         """
         generator of keys to bins of records which *may* overlap the given region
 
@@ -384,7 +393,7 @@ class TabixIndex:
             s -= 3
 
     @staticmethod
-    def region_to_bin(begin, end):
+    def region_to_bin(begin: int, end: int) -> int:
         """
         returns the index of the smallest bin that contains the region
         as a half-closed half-open interval
@@ -402,7 +411,7 @@ class TabixIndex:
         return 0
 
     @staticmethod
-    def bin_start(k):
+    def bin_start(k: int) -> int:
         # bit_length-1 is int log2
         lvl = (((7 * k) + 1).bit_length() - 1) // 3
         ol = ((2 ** (3 * lvl)) - 1) // 7
@@ -411,7 +420,7 @@ class TabixIndex:
         return start
 
     @staticmethod
-    def bin_size(k):
+    def bin_size(k: int) -> int:
         # bit_length-1 is int log2
         lvl = (((7 * k) + 1).bit_length() - 1) // 3
         sl = 2 ** (29 - (3 * lvl))
@@ -419,16 +428,16 @@ class TabixIndex:
 
 
 class TabixIndexedFile:
-    def __init__(self, fileobj, index):
+    def __init__(self, fileobj, index: TabixIndex):
         self.index = index
         self.bgzipped = BlockGZipReader(fileobj)
 
-    @staticmethod
-    def from_files(fileobj, index_fileobj):
-        return TabixIndexedFile(fileobj, TabixIndex.from_file(index_fileobj))
+    @classmethod
+    def from_files(cls, fileobj, index_fileobj):
+        return cls(fileobj, TabixIndex.from_file(index_fileobj))
 
     def fetch_bytes_block_offset(
-        self, block_start, offset_start, block_end, offset_end
+        self, block_start: int, offset_start: int, block_end: int, offset_end: int
     ):
         value = b""
         self.bgzipped.seek(block_start)
@@ -451,7 +460,7 @@ class TabixIndexedFile:
             block = self.bgzipped.tell()
         return value
 
-    def fetch_bytes_virtual(self, virtual_start, virtual_end):
+    def fetch_bytes_virtual(self, virtual_start: int, virtual_end: int):
         # the lower 16 bits store the offset of the byte inside the gzip block
         # the rest store the offset of gzip block
         block_start = virtual_start >> 16
@@ -462,7 +471,7 @@ class TabixIndexedFile:
             block_start, offset_start, block_end, offset_end
         )
 
-    def fetch_bytes(self, name, start, end=None):
+    def fetch_bytes(self, name: str, start: int, end: Union[None, int]) -> bytes:
         """
         Returns bytes in the region of interest
         """
@@ -481,9 +490,15 @@ class TabixIndexedFile:
         if not virtual_start and not virtual_end:
             return b""
 
+        # check for weirdness if only one is missing
+        if virtual_start is None or virtual_end is None:
+            raise RuntimeError()
+
         return self.fetch_bytes_virtual(virtual_start, virtual_end)
 
-    def fetch_lines(self, name, start, end=None):
+    def fetch_lines(
+        self, name: str, start: int, end: Union[None, int]
+    ) -> Generator[str, None, None]:
         """
         Returns lines in the region of interest
         """
@@ -494,7 +509,7 @@ class TabixIndexedFile:
         region = self.fetch_bytes(name, start, end)
         # no region, no lines
         if not region:
-            return ""
+            return ("" for _ in [])
 
         # turn the bytes into a list of strings
         lines = region.decode("utf-8").splitlines()
@@ -502,32 +517,62 @@ class TabixIndexedFile:
         # filter out comments
         lines = (line for line in lines if not line.startswith(self.index.meta))
 
+        # split lines
+        lines_split = ((line, line.split("\t")) for line in lines)
+
         # filter lines of wrong lengths i.e. cut off around chunk boundries
-        lines = (
-            line
-            for line in lines
-            if len(line.split("\t"))
-            >= max(
-                self.index.column_sequence,
-                self.index.column_begin,
-                self.index.column_end,
-            )
+        expected_len = max(
+            self.index.column_sequence,
+            self.index.column_begin,
+            self.index.column_end,
         )
-        # filter lines before start
+
+        # filter lines before start and after end
         column_begin = self.index.column_begin
         # default to using begin column again
         column_end = (
             self.index.column_end if self.index.column_end else self.index.column_begin
         )
-        lines = (
-            line for line in lines if int(line.split("\t")[column_begin - 1]) >= start
+
+        return (
+            line
+            for line, line_split in lines_split
+            if (
+                len(line_split) >= expected_len  # right length
+                and int(line_split[column_begin - 1]) >= start  # after start
+                and int(line_split[column_end - 1]) <= end  # before end
+            )
         )
-        lines = (line for line in lines if int(line.split("\t")[column_end - 1]) <= end)
 
-        return lines
-
-    def fetch(self, name, start, end=None):
+    def fetch(self, name: str, start: int, end: Union[None, int] = None) -> str:
         """
         Returns region of interest
         """
         return "\n".join(self.fetch_lines(name, start, end))
+
+
+class TabixIndexedVCFFile(TabixIndexedFile):
+    accumulator: VCFAccumulator
+    vcf_fsm: FSMachine
+
+    def __init__(self, fileobj, index):
+        super().__init__(fileobj, index)
+        self.vcf_fsm = get_vcf_fsm()
+        self.accumulator = VCFAccumulator()
+
+    def fetch_vcf_lines(
+        self, name: str, start: int, end: Union[None, int] = None
+    ) -> Generator[VCFLine, None, None]:
+        # default if only start specified
+        if not end:
+            end = start
+
+        for line in self.fetch_bytes(name, start, end).decode("utf-8").splitlines():
+            self.vcf_fsm.run(line, LINE_START, self.accumulator)
+            vcfline = self.accumulator.to_vcfline()
+            self.accumulator.reset()
+            if (
+                vcfline.pos >= start  # after start
+                and vcfline.pos + len(vcfline.ref) - 1 <= end  # before end
+            ):
+                yield vcfline
