@@ -181,7 +181,11 @@ class VCFLine:
                 return line
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.comment_raw},{self.comment_key},{self.comment_value_str},{self.comment_value_dict},{self.chrom},{self.pos},{self._id},{self.ref},{self.alt},{self.qual_str},{self._filter},{self.info},{self.sample})"
+        return (
+            f"{self.__class__.__name__}({repr(self.comment_raw)},{repr(self.comment_key)},{repr(self.comment_value_str)},"
+            + f"{repr(self.comment_value_dict)},{repr(self.chrom)},{repr(self.pos)},{repr(self._id)},{repr(self.ref)},{repr(self.alt)},"
+            + f"{repr(self.qual_str)},{repr(self._filter)},{repr(self.info)},{repr(self.sample)})"
+        )
 
     @property
     def is_comment(self) -> bool:
