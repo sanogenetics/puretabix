@@ -11,6 +11,7 @@ based on https://gist.github.com/brianray/8d3e697dbbf150f725291d74ac0cee8b
 
 import logging
 import re
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class FSMachine:
         self.transitions = {}
 
     def add_transition(
-        self, start_state, end_state, transition_class, condition, callback
+        self, start_state: Any, end_state: Any, transition_class, condition, callback
     ):
         """
 
@@ -77,12 +78,15 @@ class FSMachine:
         self.current_state = initial_state
         for c in inputs:
             self.process_next(c, args, kwargs)
-            # if state is None, early exist from inputs
+            # if state is None, early exit
             if not self.current_state:
-                break
+                return
 
         if not self.current_state:
-            logger.warning(f"Unexpected ending in {self.current_state}")
+            # process that we reached the end of the input
+            self.process_next(None, args, kwargs)
+        else:
+            logger.warning(f"Unexpected ending at {self.current_state} in {input}")
 
     def process_next(self, _input, callback_args, callback_kwargs):
         frozen_state = self.current_state

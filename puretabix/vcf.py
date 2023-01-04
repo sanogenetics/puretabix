@@ -526,7 +526,11 @@ def get_vcf_fsm():
         INFO_KEY, FORMAT, SetInTransition, "\t", VCFAccumulator.info_key_to_info_key
     )
     fsm_vcf.add_transition(
-        INFO_KEY, None, SetInTransition, "\n", VCFAccumulator.info_key_to_info_key
+        INFO_KEY,
+        None,
+        SetInTransition,
+        ("\n", None),
+        VCFAccumulator.info_key_to_info_key,
     )
     fsm_vcf.add_transition(
         INFO_VALUE,
@@ -549,7 +553,11 @@ def get_vcf_fsm():
         INFO_VALUE, FORMAT, SetInTransition, "\t", VCFAccumulator.info_value_to_format
     )
     fsm_vcf.add_transition(
-        INFO_VALUE, None, SetInTransition, "\n", VCFAccumulator.info_value_to_format
+        INFO_VALUE,
+        None,
+        SetInTransition,
+        ("\n", None),
+        VCFAccumulator.info_value_to_format,
     )
     fsm_vcf.add_transition(
         FORMAT, FORMAT, SetNotInTransition, "\t:", VCFAccumulator.append_character
@@ -567,14 +575,14 @@ def get_vcf_fsm():
         SAMPLE, SAMPLE, SetInTransition, "\t", VCFAccumulator.sample_to_sample
     )
     fsm_vcf.add_transition(
-        SAMPLE, None, SetInTransition, "\n", VCFAccumulator.sample_to_sample
+        SAMPLE, None, SetInTransition, ("\n", None), VCFAccumulator.sample_to_sample
     )
     fsm_vcf.add_transition(LINE_START, COMMENT, SetInTransition, "#", None)
     fsm_vcf.add_transition(
         COMMENT, COMMENT, SetNotInTransition, "#\n", VCFAccumulator.append_character
     )
     fsm_vcf.add_transition(
-        COMMENT, None, SetInTransition, "\n", VCFAccumulator.end_comment
+        COMMENT, None, SetInTransition, ("\n", None), VCFAccumulator.end_comment
     )
     fsm_vcf.add_transition(COMMENT, COMMENT_KEY, SetInTransition, "#", None)
     fsm_vcf.add_transition(
@@ -606,7 +614,11 @@ def get_vcf_fsm():
         VCFAccumulator.comment_value_to_comment_struct_key,
     )
     fsm_vcf.add_transition(
-        COMMENT_VALUE, None, RegexTransition, "\n", VCFAccumulator.comment_value_to_end
+        COMMENT_VALUE,
+        None,
+        SetInTransition,
+        ("\n", None),
+        VCFAccumulator.comment_value_to_end,
     )
     fsm_vcf.add_transition(
         COMMENT_STRUCT_KEY,
