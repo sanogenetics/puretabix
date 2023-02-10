@@ -128,6 +128,8 @@ Global git ignores per https://help.github.com/en/github/using-git/ignoring-file
 
 For release to PyPI see https://packaging.python.org/tutorials/packaging-projects/
 
+For information about packaging wheels see https://realpython.com/python-wheels/
+
 ```sh
 git checkout master
 git pull
@@ -136,7 +138,7 @@ git commit -m"prepare for x.x.x"
 git push
 git tag x.x.x
 git push origin x.x.x
-python3 setup.py sdist && python3 -m twine upload dist/*
+python3 setup.py sdist bdist_wheel && python3 -m twine upload dist/*
 ```
 
 acknowledgements
