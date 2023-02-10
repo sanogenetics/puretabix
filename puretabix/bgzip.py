@@ -221,7 +221,6 @@ class BlockGZipReader:
             offsetstarts.append(offset)
             offset += len(line)
             offsetends.append(offset)
-            offset += 1
         return (
             header,
             cdata,
