@@ -338,31 +338,13 @@ class TabixIndex:
 
             # throw away the first 14 bits to get interval index
             # e.g. 0 => 0, 16384 => 1, etc
-            interval_i_start = record_start >> 14
-            # subtract another 1 because half-open end
-            interval_i_end = record_end >> 14
+            interval_i = record_start >> 14
 
-            for linear_i in sorted(set((interval_i_start, interval_i_end))):
-                # add any padding intervals
-                while len(interval_index) <= linear_i:
-                    interval_index.append(-1)
-
-                # if there is no previous value, or the previous value was higher
-                # replace previous value
-                if (
-                    interval_index[linear_i] == -1
-                    or start_virtual < interval_index[linear_i]
-                ):
-                    interval_index[linear_i] = start_virtual
-
-            # pass through again and replace any -1 values with the last "not -1" value
-            # these are intervals with no overlapping records
-            lastgood = -1
-            for i in range(len(interval_index)):
-                if interval_index[i] == -1:
-                    interval_index[i] = lastgood
-                else:
-                    lastgood = interval_index[i]
+            # line fully in block
+            if start_block == end_block:
+                # pad if necessary
+                while len(interval_index) <= interval_i:
+                    interval_index.append(start_virtual)
 
         return cls(
             file_format, column_sequence, column_begin, column_end, meta, 0, indexes
@@ -494,7 +476,7 @@ class TabixIndexedFile:
         if virtual_start is None or virtual_end is None:
             raise RuntimeError()
 
-        return self.fetch_bytes_virtual(virtual_start, virtual_end)
+        return self.fetch_bytes_virtual(virtual_start, virtual_end - 1)
 
     def fetch_lines(
         self, name: str, start: int, end: Union[None, int]
@@ -568,7 +550,11 @@ class TabixIndexedVCFFile(TabixIndexedFile):
             end = start
 
         for line in self.fetch_bytes(name, start, end).decode("utf-8").splitlines():
-            self.vcf_fsm.run(line, LINE_START, self.accumulator)
+            try:
+                self.vcf_fsm.run(line, LINE_START, self.accumulator)
+            except ValueError as e:
+                logger.error(f"Error parsing {line}")
+                raise e
             vcfline = self.accumulator.to_vcfline()
             self.accumulator.reset()
             if (
