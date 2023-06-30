@@ -556,8 +556,8 @@ class TabixIndexedVCFFile(TabixIndexedFile):
         """
         Return the header of a VCF file as a string.
         """
-        assert cls.vcf_path is not None
-
+        assert cls.bgzipp is not None
+        
         current_position = cls.bgzipped.tell()
 
         if (not cls.bgzipped.check_is_block_gzip()):  ## Note: this moves the file pointer. Must call seek to return to 0.
