@@ -571,7 +571,8 @@ class TabixIndexedVCFFile(TabixIndexedFile):
             xdat.extend(data)
             last_line_location = re.search("#CHROM.*\n", xdat.decode())  ## Search until the VCF sample line.
         
-        self.bgzipped.seek(current_position)
+        self.bgzipped.seek(current_position) ## reset file pointer to original position
+        
         return last_line_location.string[:last_line_location.end(0)]  ## Slice the string to just the header.
 
     def fetch_vcf_lines(
