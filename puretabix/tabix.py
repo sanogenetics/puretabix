@@ -255,6 +255,12 @@ class TabixIndex:
                 outfile.write(struct.pack("<Q", ioff))
 
     @classmethod
+    def get_contigs(cls):
+        assert cls.indexes is not None
+        return list(cls.indexes.keys())
+
+
+    @classmethod
     def build_from(cls, rawfile) -> "TabixIndex":
         """
         read a vcf file in blockgzip format and create an index object for it
