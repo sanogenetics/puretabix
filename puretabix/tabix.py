@@ -551,28 +551,29 @@ class TabixIndexedVCFFile(TabixIndexedFile):
         self.vcf_fsm = get_vcf_fsm()
         self.accumulator = VCFAccumulator()
 
-    def fetch_vcf_header(self):
+    @classmethod
+    def fetch_vcf_header(cls):
         """
         Return the header of a VCF file as a string.
         """
-        assert self.vcf_path is not None
+        assert cls.vcf_path is not None
 
-        current_position = self.bgzipped.tell()
+        current_position = cls.bgzipped.tell()
 
-        if (not self.bgzipped.check_is_block_gzip()):  ## Note: this moves the file pointer. Must call seek to return to 0.
+        if (not cls.bgzipped.check_is_block_gzip()):  ## Note: this moves the file pointer. Must call seek to return to 0.
             raise Exception("Indexed file must be block-gzipped.")
 
-        self.bgzipped.seek(0)  ## Reset to start of file.
+        cls.bgzipped.seek(0)  ## Reset to start of file.
 
         xdat = bytearray()
         last_line_location = None  ## Will store an re.match object, terminating the loop when the last header line is found.
         while not last_line_location:
-            _, _, data, _ = self.bgzipped.get_block()  ## Read the next block from the file.
+            _, _, data, _ = cls.bgzipped.get_block()  ## Read the next block from the file.
             xdat.extend(data)
             last_line_location = re.search("#CHROM.*\n", xdat.decode())  ## Search until the VCF sample line.
         
-        self.bgzipped.seek(current_position) ## reset file pointer to original position
-        
+        cls.bgzipped.seek(current_position) ## reset file pointer to original position
+
         return last_line_location.string[:last_line_location.end(0)]  ## Slice the string to just the header.
 
     def fetch_vcf_lines(
