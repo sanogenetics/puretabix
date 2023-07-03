@@ -177,11 +177,26 @@ class TabixIndex:
                 for chunk in bin_index[chunks_bin_index]:
                     yield chunk
 
+    def _lookup_sequence_min_max(self, sequence_name: str) -> Union[Tuple[None, None], Tuple[int, int]]:
+
+        seq_start = None
+        seq_end = None
+
+        if sequence_name in self.indexes:
+            end_offsets = [item[1] for item in self.indexes[sequence_name][0].items()] ## Collect all values across the bins for this sequence.
+            seq_end = max([max(item) for sublist in end_offsets for item in sublist]) ## Unroll the lists and find the max offset value, representing the end.
+            seq_start = min([min(item) for sublist in end_offsets for item in sublist])
+        
+        return seq_start, seq_end
+
     def lookup_virtual(
         self, sequence_name: str, start: int, end: int
     ) -> Union[Tuple[None, None], Tuple[int, int]]:
         virtual_start = None
         virtual_end = None
+
+        if start is None and end is None:
+            return self._lookup_sequence_min_max(sequence_name)
 
         linear_start = self._lookup_linear(sequence_name, start)
         # if this is not in the linear index, cant return anything
