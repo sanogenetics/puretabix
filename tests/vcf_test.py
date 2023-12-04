@@ -54,8 +54,6 @@ class TestVCFFSM:
 
         for line_in, line_out in zip(lines, lines_parsed):
             line_in = line_in.strip()
-            print(line_in)
-            print(str(line_out).strip())
             assert line_in == str(line_out), (line_in, line_out)
 
     def test_dbsnp_gt(self, vcf_gz):
@@ -64,7 +62,14 @@ class TestVCFFSM:
 
         for line_in, line_out in zip(lines, lines_parsed):
             line_in = line_in.strip()
-            print(line_in)
-            print(str(line_out).strip())
             if not line_out.is_comment:
                 assert line_out.get_genotype()
+
+    def test_dbsnp_header(self, vcf_gz):
+        lines = tuple(map(bytes.decode, vcf_gz.readlines()))
+        lines_parsed = read_vcf_lines(lines, header_only=True)
+
+        for line_in, line_out in zip(lines, lines_parsed):
+            line_in = line_in.strip()
+            assert line_out.is_comment
+            assert str(line_out).startswith("#")
