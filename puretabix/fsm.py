@@ -11,54 +11,102 @@ based on https://gist.github.com/brianray/8d3e697dbbf150f725291d74ac0cee8b
 
 import logging
 import re
-from typing import Any
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    Iterable,
+    Mapping,
+    Optional,
+    Pattern,
+    Type,
+    Union,
+)
 
 logger = logging.getLogger(__name__)
 
+# note: Optional[Callable[[Any, str], None]] isn't the optimal type hint for the callbacks
+# In theory, they can take an arbitrary number of parameters as long as the last position is a str
+# and the others are matched via callback_args/callback_kwargs
+# This might be able to be captured in newer Python versions with Protocol and/or ParamSpec
+
 
 class RegexTransition:
+    dst: Any
+    condition: Pattern[str]
+    callback: Optional[Callable[[Any, str], None]]
     __slots__ = ["dst", "condition", "callback"]
 
-    def __init__(self, destination_state, condition, callback):
+    def __init__(
+        self,
+        destination_state: Any,
+        condition: str,
+        callback: Callable[[Any, str], None],
+    ):
         self.dst = destination_state
         self.condition = re.compile(condition)
         self.callback = callback
 
-    def match(self, _input):
-        return self.condition.match(_input)
+    def match(self, _input: str) -> bool:
+        return bool(self.condition.match(_input))
 
 
 class SetInTransition:
+    dst: Any
+    condition: FrozenSet[str]
+    callback: Optional[Callable[[Any, str], None]]
     __slots__ = ["dst", "condition", "callback"]
 
-    def __init__(self, destination_state, condition, callback):
+    def __init__(
+        self,
+        destination_state: Any,
+        condition: Iterable[str],
+        callback: Optional[Callable[[Any, str], None]],
+    ):
         self.dst = destination_state
         self.condition = frozenset(condition)
         self.callback = callback
 
-    def match(self, _input):
-        return _input in self.condition
+    def match(self, _input: Union[str, bytes]) -> bool:
+        return bool(_input in self.condition)
 
 
 class SetNotInTransition:
+    dst: Any
+    condition: FrozenSet[str]
+    callback: Optional[Callable[[Any, str], None]]
+
     __slots__ = ["dst", "condition", "callback"]
 
-    def __init__(self, destination_state, condition, callback):
+    def __init__(
+        self,
+        destination_state: Any,
+        condition: Iterable[str],
+        callback: Optional[Callable[[Any, str], None]],
+    ):
         self.dst = destination_state
         self.condition = frozenset(condition)
         self.callback = callback
 
-    def match(self, _input):
-        return _input not in self.condition
+    def match(self, _input: Union[str, bytes]) -> bool:
+        return bool(_input not in self.condition)
 
 
 class FSMachine:
-    def __init__(self):
+    transitions: Dict[Any, Any]
+
+    def __init__(self) -> None:
         self.transitions = {}
 
     def add_transition(
-        self, start_state: Any, end_state: Any, transition_class, condition, callback
-    ):
+        self,
+        start_state: Any,
+        end_state: Any,
+        transition_class: Type[Any],
+        condition: Any,
+        callback: Optional[Callable[[Any, str], None]],
+    ) -> None:
         """
 
         callback should be a function that accepts the current character of the state
@@ -74,7 +122,13 @@ class FSMachine:
             transition_class(end_state, condition, callback)
         )
 
-    def run(self, inputs, initial_state, *args, **kwargs):
+    def run(
+        self,
+        inputs: Iterable[str],
+        initial_state: Any,
+        *args: Any,
+        **kwargs: Dict[Any, Any],
+    ) -> None:
         self.current_state = initial_state
         for c in inputs:
             self.process_next(c, args, kwargs)
@@ -89,7 +143,12 @@ class FSMachine:
         # check at a valid end state
         assert not self.current_state, f"Unexpected ending at {self.current_state}"
 
-    def process_next(self, _input, callback_args, callback_kwargs):
+    def process_next(
+        self,
+        _input: Optional[str],
+        callback_args: Any,
+        callback_kwargs: Mapping[Any, Any],
+    ) -> bool:
         frozen_state = self.current_state
         for transition in self.transitions[frozen_state]:
             if transition.match(_input):

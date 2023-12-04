@@ -1,4 +1,6 @@
-from typing import Dict, Generator, Iterable, Optional, Tuple
+from typing import Dict, Generator, Iterable, List, Mapping, Optional, Tuple
+
+from typing_extensions import Self
 
 from .fsm import (
     FSMachine,
@@ -45,17 +47,17 @@ class VCFLine:
     comment_raw: str  # non-empty if line starts with #
     comment_key: str  # non-empty if line starts with ##
     comment_value_str: str  # non-empty if line starts with ##
-    comment_value_dict: Dict[str, str]
+    comment_value_dict: Dict[str, Optional[str]]
     chrom: str
     pos: int
-    _id: Tuple[str]
+    _id: Tuple[str, ...]
     ref: str
-    alt: Tuple[str]
+    alt: Tuple[str, ...]
     qual: Optional[float]
     qual_str: str
-    _filter: Tuple[str]
-    info: Dict[str, str]
-    sample: Tuple[Dict[str, str]]
+    _filter: Tuple[str, ...]
+    info: Dict[str, Optional[Iterable[str]]]
+    sample: Tuple[Dict[str, str], ...]
 
     __slots__ = (
         "comment_raw",
@@ -79,7 +81,7 @@ class VCFLine:
         comment_raw: str,
         comment_key: str,
         comment_value_str: str,
-        comment_value_dict: Dict[str, str],
+        comment_value_dict: Dict[str, Optional[str]],
         chrom: str,
         pos: int,
         _id: Iterable[str],
@@ -87,8 +89,8 @@ class VCFLine:
         alt: Iterable[str],
         qual_str: str,
         _filter: Iterable[str],
-        info: Dict[str, str],
-        sample: Iterable[Dict[str, str]],
+        info: Mapping[str, Optional[Iterable[str]]],
+        sample: Iterable[Mapping[str, str]],
     ):
         # TODO validation of permitted characters
         self.comment_raw = comment_raw
@@ -102,9 +104,9 @@ class VCFLine:
         self.alt = tuple(alt)
         self.qual_str = qual_str
         self._filter = tuple(_filter)
-        self.info = info
+        self.info = dict(info)
         # this may be zero to many
-        self.sample = tuple(sample)
+        self.sample = tuple(dict(s) for s in sample)
 
         try:
             self.qual = float(qual_str)
@@ -200,7 +202,7 @@ class VCFLine:
         if self.is_comment:
             raise ValueError("Cannot get_gt() of a comment")
 
-        result = [tuple() for _ in range(len(self.sample))]
+        result: List[Tuple[str, ...]] = [tuple() for _ in range(len(self.sample))]
         refalt = (self.ref,) + self.alt
         for i, sample in enumerate(self.sample):
             if "GT" in sample:
@@ -249,14 +251,14 @@ class VCFLine:
         )
 
     @classmethod
-    def as_comment_key_dict(cls, key: str, value_dict: Dict[str, str]) -> "VCFLine":
+    def as_comment_key_dict(cls, key: str, value_dict: Mapping[str, str]) -> "VCFLine":
         # for example
         # ##INFO=<ID=ID,Number=number,Type=type,Description="description",Source="source",Version="version">
         return cls(
             comment_raw="",
             comment_key=key,
             comment_value_str="",
-            comment_value_dict=value_dict,
+            comment_value_dict=dict(value_dict),
             chrom="",
             pos=0,
             _id=[],
@@ -278,9 +280,9 @@ class VCFLine:
         alt: Iterable[str],
         qual_str: str,
         _filter: Iterable[str],
-        info: Dict[str, str],
-        sample: Iterable[Dict[str, str]],
-    ):
+        info: Mapping[str, Optional[Iterable[str]]],
+        sample: Iterable[Mapping[str, str]],
+    ) -> Self:
         return cls(
             comment_raw="",
             comment_key="",
@@ -299,10 +301,19 @@ class VCFLine:
 
 
 class VCFAccumulator:
-    def __init__(self):
+    __characters: List[str]
+    comment_struct: Dict[str, Optional[str]]
+    _id: List[str]
+    alt: List[str]
+    _filter: List[str]
+    info: Dict[str, Optional[List[str]]]
+    format: List[str]
+    samples: List[Dict[str, str]]
+
+    def __init__(self) -> None:
         self.reset()
 
-    def reset(self):
+    def reset(self) -> None:
         self.__characters = []
 
         self.comment_raw = ""
@@ -324,7 +335,7 @@ class VCFAccumulator:
         self.format = []
         self.samples = []
 
-    def to_vcfline(self):
+    def to_vcfline(self) -> VCFLine:
         return VCFLine(
             self.comment_raw,
             self.comment_key,
@@ -341,26 +352,26 @@ class VCFAccumulator:
             self.samples,
         )
 
-    def append_character(self, _char):
+    def append_character(self, _char: str) -> None:
         self.__characters.append(_char)
 
-    def end_comment(self, _char):
+    def end_comment(self, _char: str) -> None:
         self.comment_raw = "".join(self.__characters)
         self.__characters = []
 
-    def comment_value_to_end(self, _char):
+    def comment_value_to_end(self, _char: str) -> None:
         self.comment_value = "".join(self.__characters)
         self.__characters = []
 
-    def comment_key_to_comment_value(self, _char):
+    def comment_key_to_comment_value(self, _char: str) -> None:
         self.comment_key = "".join(self.__characters)
         self.__characters = []
 
-    def comment_value_to_comment_struct_key(self, _char):
+    def comment_value_to_comment_struct_key(self, _char: str) -> None:
         self.comment_value = "".join(self.__characters)
         self.__characters = []
 
-    def comment_struct_key_to_comment_struct_value(self, _char):
+    def comment_struct_key_to_comment_struct_value(self, _char: str) -> None:
         comment_struct_key = "".join(self.__characters)
         assert self._comment_struct_key not in self.comment_struct, (
             self._comment_struct_key,
@@ -369,7 +380,7 @@ class VCFAccumulator:
         self.comment_struct[comment_struct_key] = None
         self.__characters = []
 
-    def comment_struct_value_to_comment_struct_key(self, _char):
+    def comment_struct_value_to_comment_struct_key(self, _char: str) -> None:
         self._comment_struct_value = "".join(self.__characters)
         self.__characters = []
         # this needs dict keys to be insertion ordered
@@ -377,59 +388,61 @@ class VCFAccumulator:
             tuple(self.comment_struct.keys())[-1]
         ] = self._comment_struct_value
 
-    def chrom_to_pos(self, _char):
+    def chrom_to_pos(self, _char: str) -> None:
         self.chrom = "".join(self.__characters)
         self.__characters = []
 
-    def pos_to_id(self, _char):
+    def pos_to_id(self, _char: str) -> None:
         self.pos = int("".join(self.__characters))
         self.__characters = []
 
-    def id_to_ref(self, _char):
+    def id_to_ref(self, _char: str) -> None:
         self._id.append("".join(self.__characters))
         self.__characters = []
 
-    def ref_to_alt(self, _char):
+    def ref_to_alt(self, _char: str) -> None:
         self.ref = "".join(self.__characters)
         self.__characters = []
 
-    def alt_to_alt(self, _char):
+    def alt_to_alt(self, _char: str) -> None:
         self.alt.append("".join(self.__characters))
         self.__characters = []
 
-    def alt_to_qual(self, _char):
+    def alt_to_qual(self, _char: str) -> None:
         self.alt.append("".join(self.__characters))
         self.__characters = []
 
-    def qual_to_filter(self, _char):
+    def qual_to_filter(self, _char: str) -> None:
         self.qual = "".join(self.__characters)
         self.__characters = []
 
-    def filter_to_info_key(self, _char):
+    def filter_to_info_key(self, _char: str) -> None:
         self._filter.append("".join(self.__characters))
         self.__characters = []
 
-    def info_key_to_info_key(self, _char):
+    def info_key_to_info_key(self, _char: str) -> None:
         self.__infokey = "".join(self.__characters)
         self.info[self.__infokey] = None
         self.__characters = []
 
-    def info_key_to_info_value(self, _char):
+    def info_key_to_info_value(self, _char: str) -> None:
         self.__infokey = "".join(self.__characters)
         self.__characters = []
 
-    def info_value_to_format(self, _char):
+    def info_value_to_format(self, _char: str) -> None:
         __infovalue = "".join(self.__characters)
-        if self.__infokey not in self.info:
-            self.info[self.__infokey] = []
-        self.info[self.__infokey].append(__infovalue)
+        if self.__infokey in self.info and self.info[self.__infokey] is not None:
+            # cannot get here if none, so this won't error
+            self.info[self.__infokey].append(__infovalue)  # type: ignore[union-attr]
+        else:
+            self.info[self.__infokey] = [__infovalue]
         self.__characters = []
 
-    def format_to_sample(self, _char):
+    def format_to_sample(self, _char: str) -> None:
         self.format.append("".join(self.__characters))
         self.__characters = []
 
-    def sample_to_sample(self, _char):
+    def sample_to_sample(self, _char: str) -> None:
         sample_str = "".join(self.__characters)
         sample_parts = sample_str.split(":")
         sample = {}
@@ -462,8 +475,7 @@ FORMAT = "FORMAT"
 SAMPLE = "SAMPLE"
 
 
-def get_vcf_fsm():
-
+def get_vcf_fsm() -> FSMachine:
     fsm_vcf = FSMachine()
 
     fsm_vcf.add_transition(

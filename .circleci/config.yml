@@ -19,6 +19,13 @@ jobs:
       - run:
           command: pipdeptree
       - run:
+          command: black . --check
+      - run:
+          command: isort . --check
+      - run:
+          # dont want to enforce typing on tests
+          command: mypy --strict puretabix
+      - run:
           name: tests & coverage
           command: |
             pytest tests/ -s --cov --cov-report xml:test-reports/coverage.xml --junitxml test-reports/pytest/tests.xml
@@ -34,4 +41,10 @@ workflows:
       - test:
           matrix:
             parameters:
-              image: ["circleci/python:3.8.9", "circleci/python:3.9.9", "circleci/python:3.10.1"]
+              image:
+                [
+                  "cimg/python:3.8.18",
+                  "cimg/python:3.9.18",
+                  "cimg/python:3.10.13",
+                  "cimg/python:3.11.6",
+                ]

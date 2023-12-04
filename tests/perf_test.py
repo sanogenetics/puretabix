@@ -125,7 +125,6 @@ if __name__ == "__main__":
             "CEU.exon.2010_03.genotypes.trimmed.vcf.gz.tbi",
         )
         with open(pth, "rb") as vcf_tbi:
-
             # do it 100 times for profiling
             for _ in range(100):
                 indexed = TabixIndexedVCFFile.from_files(vcf, vcf_tbi)

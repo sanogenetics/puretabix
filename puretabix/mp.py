@@ -2,7 +2,20 @@ import multiprocessing
 import multiprocessing.connection
 from multiprocessing.connection import Connection
 from multiprocessing.context import Process
-from typing import Any, Callable, Dict, Iterable, List
+from types import TracebackType
+from typing import (
+    Any,
+    Callable,
+    Generator,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    Type,
+)
+
+from typing_extensions import Self
 
 """
 Note, AWS Lambda doesn't support shared memory locks because /dev/shm
@@ -13,22 +26,34 @@ SENTINEL = "SENTINEL"
 
 
 class SingleProcessGeneratorPool:
-    def __init__(self, *args, **kwargs):
+    pending: List[Tuple[Callable[..., Any], Mapping[Any, Any]]]
+
+    def __init__(self, *args: Any, **kwargs: Mapping[Any, Any]):
         self.pending = []
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(
+        self,
+        exctype: Optional[Type[BaseException]],
+        excinst: Optional[BaseException],
+        exctb: Optional[TracebackType],
+    ) -> None:
         pass
 
-    def __len__(self):
+    def __len__(self) -> int:
         return 1
 
-    def submit(self, func, kwargss, batchsize=1024):
+    def submit(
+        self,
+        func: Callable[..., Any],
+        kwargss: Mapping[Any, Any],
+        batchsize: int = 1024,
+    ) -> None:
         self.pending.append((func, kwargss))
 
-    def results(self):
+    def results(self) -> Generator[Tuple[Mapping[Any, Any], Any], None, None]:
         while self.pending:
             func, kwargss = self.pending.pop()
             for kwargs in kwargss:
@@ -60,10 +85,15 @@ class MultiprocessGeneratorPool:
         for subproc in self.subprocs:
             subproc.start()
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(
+        self,
+        exctype: Optional[Type[BaseException]],
+        excinst: Optional[BaseException],
+        exctb: Optional[TracebackType],
+    ) -> None:
         for i in range(len(self.pipesparent)):
             self.pipesparent[i].send(SENTINEL)
         for i in range(len(self.pipesparent)):
@@ -71,12 +101,15 @@ class MultiprocessGeneratorPool:
         for i in range(len(self.subprocs)):
             self.subprocs[i].join(1)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.subprocs)
 
     def submit(
-        self, func: Callable, kwargss: Iterable[Dict[Any, Any]], batchsize: int = 1024
-    ):
+        self,
+        func: Callable[..., Any],
+        kwargss: Iterable[Mapping[Any, Any]],
+        batchsize: int = 1024,
+    ) -> None:
         i = 0
         for kwargs in kwargss:
             # send this set of kwarguments
@@ -84,13 +117,14 @@ class MultiprocessGeneratorPool:
             # point to the next pipe, wrapping if necessary
             i = i + 1 if i + 1 < len(self.subprocs) else 0
 
-    def results(self):
+    def results(self) -> Generator[Tuple[Mapping[Any, Any], Any], None, None]:
         # wait until we have enough sentinels
         sentinelcount = 0
         while sentinelcount < len(self.subprocs):
             # check which pipes have data in them
             # process each result pipe in turn
-            for pipe in multiprocessing.connection.wait(self.pipesparent):
+            pipe: Connection
+            for pipe in multiprocessing.connection.wait(self.pipesparent):  # type: ignore
                 result = pipe.recv()
                 # we recieved a sentinel value to say that a chunk is complete
                 if result == SENTINEL:
