@@ -12,3 +12,4 @@ dist
 test-reports/
 tests/perf_test.txt
 .DS_store
+build
