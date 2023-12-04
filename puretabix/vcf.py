@@ -692,15 +692,25 @@ def get_vcf_fsm():
     return fsm_vcf
 
 
-def read_vcf_lines(input: Iterable[str]) -> Generator[VCFLine, None, None]:
+def read_vcf_lines(
+    input_: Iterable[str], header_only: bool = False
+) -> Generator[VCFLine, None, None]:
     """
     Convenience function for parsing a source of VCF lines
     """
     vcf_fsm = get_vcf_fsm()
     accumulator = VCFAccumulator()
-    for line in input:
+    for line in input_:
         if line:
             vcf_fsm.run(line, LINE_START, accumulator)
             vcfline = accumulator.to_vcfline()
             accumulator.reset()
+
+            # if we only want to get the initial header
+            # and this is not part of the header
+            # then stop
+            # Note: this does include the vcf column headings (sample names)
+            if not vcfline.is_comment and header_only:
+                break
+
             yield vcfline
