@@ -2,7 +2,9 @@ import io
 import logging
 import struct
 import zlib
-from typing import Tuple
+from typing import Generator, Optional, Tuple
+
+from typing_extensions import Buffer
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +36,7 @@ class BlockGZipReader:
         self.raw.seek(0)
         bytes_data = self.raw.read(3)
         header = struct.unpack("<BBB", bytes_data)
-        return header[0] == 31 and header[1] == 139 and header[2] == 8
+        return bool(header[0] == 31 and header[1] == 139 and header[2] == 8)
 
     def check_is_block_gzip(self) -> bool:
         """
@@ -49,10 +51,10 @@ class BlockGZipReader:
         self.raw.seek(12)
         bytes_data = self.raw.read(4)
         header = struct.unpack("<ccH", bytes_data)
-        return header[0] == b"B" and header[1] == b"C" and header[2] == 2
+        return bool(header[0] == b"B" and header[1] == b"C" and header[2] == 2)
 
     @staticmethod
-    def check_is_header(header: Tuple) -> bool:
+    def check_is_header(header: Tuple[int, ...]) -> bool:
         """
         tests if a series of integers matches a blockgzip header
         """
@@ -72,7 +74,7 @@ class BlockGZipReader:
             return False
         return True
 
-    def get_header(self) -> Tuple:
+    def get_header(self) -> Tuple[int, ...]:
         """
         reads the next header from the file from the current point, assuming file is currently
         at start of a block
@@ -84,7 +86,7 @@ class BlockGZipReader:
         assert self.check_is_header(header)
         return header
 
-    def get_cdata(self, header) -> bytes:
+    def get_cdata(self, header: Tuple[int, ...]) -> bytes:
         """
         reads the compressed data of a block from the current point, given the bytes from the
         header of that block to determine size
@@ -92,9 +94,9 @@ class BlockGZipReader:
         blocksize = header[11] - header[7] - 19
         cdata = self.raw.read(blocksize)
         assert len(cdata) == blocksize, f"Unable to read up to {blocksize} of cdata"
-        return cdata
+        return bytes(cdata)
 
-    def get_tail(self, decompressed=None) -> Tuple[int, int]:
+    def get_tail(self, decompressed: Optional[bytes] = None) -> Tuple[int, int]:
         """
         reads the tail of the block from the current point as a tuple of crc and isize
         if the decompressed bytes are provided, will use the crc checksum in the tail
@@ -113,7 +115,7 @@ class BlockGZipReader:
             assert zlib.crc32(decompressed) == tail_crc
         return tail_crc, tail_isize
 
-    def get_cdata_decompressed(self, header) -> Tuple[bytes, bytes]:
+    def get_cdata_decompressed(self, header: Tuple[int, ...]) -> Tuple[bytes, bytes]:
         """
         reads the compressed data of a block from the current point, given the bytes from the
         header of that block to determine size
@@ -134,7 +136,9 @@ class BlockGZipReader:
         ), f"unused data present of {len(decompressor.unused_data)}"
         return cdata, decompressed
 
-    def get_block(self, header=None) -> Tuple[Tuple, bytes, bytes, Tuple[int, int]]:
+    def get_block(
+        self, header: Optional[Tuple[int, ...]] = None
+    ) -> Tuple[Tuple[int, ...], bytes, bytes, Tuple[int, int]]:
         """
         reads the block at the current point in the file
         includes decompression and validation
@@ -149,8 +153,10 @@ class BlockGZipReader:
         return header, cdata, decompressed, tail
 
     def get_block_lines(
-        self, header: Tuple = None
-    ) -> Tuple[Tuple, bytes, bytes, bytes, Tuple[bytes, ...], bytes, Tuple[int, int]]:
+        self, header: Optional[Tuple[int, ...]] = None
+    ) -> Tuple[
+        Tuple[int, ...], bytes, bytes, bytes, Tuple[bytes, ...], bytes, Tuple[int, int]
+    ]:
         """
         reads the block at the current point in the file
         includes decompression and validation
@@ -181,9 +187,9 @@ class BlockGZipReader:
         return header, cdata, decompressed, firstline, tuple(lines), lastline, tail
 
     def get_block_lines_offset(
-        self, header=None
+        self, header: Optional[Tuple[int, ...]] = None
     ) -> Tuple[
-        Tuple,
+        Tuple[int, ...],
         bytes,
         bytes,
         bytes,
@@ -233,7 +239,21 @@ class BlockGZipReader:
             tail,
         )
 
-    def scan_block_lines_offset(self, end: int = -1):
+    def scan_block_lines_offset(
+        self, end: int = -1
+    ) -> Tuple[
+        int,
+        int,
+        Tuple[int, ...],
+        bytes,
+        bytes,
+        bytes,
+        Tuple[bytes, ...],
+        bytes,
+        Tuple[int, ...],
+        Tuple[int, ...],
+        Tuple[int, int],
+    ]:
         """
         starting from the current position, scan forward through the file for the next block start
 
@@ -289,7 +309,9 @@ class BlockGZipReader:
         # reach the end of the file without finding a block
         raise EOFError()
 
-    def generate_lines_offset(self, end: int = -1):
+    def generate_lines_offset(
+        self, end: int = -1
+    ) -> Generator[Tuple[int, int, int, int, bytes], None, None]:
         """
         starting from the current position, scan forward through the file
         generator that yields for each line in the file
@@ -319,8 +341,8 @@ class BlockGZipReader:
                 # empty block is end of file
                 more = False
                 # process the last partial line first
-                blockstarts = (blockstart_previous,)
-                blockends = (blockstart_previous,)
+                blockstarts: Tuple[int, ...] = (blockstart_previous,)
+                blockends: Tuple[int, ...] = (blockstart_previous,)
                 offsetstarts = (offsetstart_previous,)
                 offsetends = (offsetstart_previous + len(partialline),)
                 lines = (partialline,)
@@ -353,7 +375,7 @@ class BlockGZipReader:
             blockstart_previous = blockstart
             offsetstart_previous = offsetends[-1] + 1
 
-    def generate_lines(self, end: int = -1):
+    def generate_lines(self, end: int = -1) -> Generator[bytes, None, None]:
         for _, _, _, _, line in self.generate_lines_offset(end):
             yield line
 
@@ -361,21 +383,24 @@ class BlockGZipReader:
 class BlockGZipWriter(io.BufferedIOBase):
     # buffer size is 64kb which is 1 block
     # 65280 is what bgzip uses, for some reason?
-    def __init__(self, raw: io.RawIOBase, block_size=65536 - 256):
+    def __init__(self, raw: io.RawIOBase, block_size: int = 65536 - 256):
         self.raw = raw
         assert self.raw.writable()
         self.block_size = block_size
         self.block_buffer = b""
 
-    def write(self, data: bytes):
+    def write(self, data: Buffer) -> int:
         self.block_buffer = self.block_buffer + data
+        write_size = 0
         while len(self.block_buffer) > self.block_size:
             content = self.block_buffer[: self.block_size]
             self.block_buffer = self.block_buffer[len(content) :]
             block = self.make_block(content)
             self.raw.write(block)
+            write_size += len(block)
+        return write_size
 
-    def flush(self):
+    def flush(self) -> None:
         while len(self.block_buffer):
             content = self.block_buffer[: self.block_size]
             self.block_buffer = self.block_buffer[len(content) :]
@@ -383,14 +408,14 @@ class BlockGZipWriter(io.BufferedIOBase):
             self.raw.write(block)
         self.raw.flush()
 
-    def close(self):
+    def close(self) -> None:
         self.flush()
         # add an empty block at the end
         self.raw.write(self.make_block(b""))
         self.raw.close()
 
     @staticmethod
-    def compress_content(content: bytes):
+    def compress_content(content: bytes) -> bytes:
         # make a new compressor each time
         compressor = zlib.compressobj(wbits=-15)
         compressed = compressor.compress(content)

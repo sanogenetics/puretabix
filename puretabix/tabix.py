@@ -1,7 +1,10 @@
 import gzip
 import logging
 import struct
-from typing import Dict, Generator, Tuple, Union
+from io import RawIOBase
+from typing import Dict, Generator, Iterable, List, Tuple, Union
+
+from typing_extensions import Self
 
 from puretabix.fsm import FSMachine
 
@@ -20,7 +23,9 @@ class TabixIndex:
         column_end: int,
         meta: str,
         headerlines_count: int,
-        indexes: Dict[str, Tuple[Dict[int, Tuple[Tuple[int, int]]], Tuple[int, ...]]],
+        indexes: Dict[
+            str, Tuple[Dict[int, Tuple[Tuple[int, int], ...]], Tuple[int, ...]]
+        ],
     ):
         """
         In-memory representation of a Tabix index. See https://samtools.github.io/hts-specs/tabix.pdf
@@ -47,7 +52,7 @@ class TabixIndex:
         self.indexes = indexes
 
     @classmethod
-    def from_file(cls, fileobj) -> "TabixIndex":
+    def from_file(cls, fileobj: RawIOBase) -> Self:
         """
         Generally these are pretty small files that need to be read entirely, thus downloading them
         locally before processing is recommented e.g. io.BytesIO
@@ -98,30 +103,32 @@ class TabixIndex:
                     f"unexpected number of sequences {n_sequences} vs {len(names)}"
                 )
 
-            indexes = {}
+            indexes: Dict[
+                str, Tuple[Dict[int, Tuple[Tuple[int, int], ...]], Tuple[int, ...]]
+            ] = {}
             # for each sequence
             for name in names:
                 # each sequence has a bin index and an interval index
 
                 # parse the bin index
                 n_bins = struct.unpack("<i", f.read(4))[0]
-                bins = {}
+                bins: Dict[int, Tuple[Tuple[int, int], ...]] = {}
                 for _ in range(n_bins):
                     # each bin has a key, and a series of chunks
                     bin_key, n_chunks = struct.unpack("<Ii", f.read(8))
-                    chunks = [
-                        chunk
-                        for chunk in struct.iter_unpack("<QQ", f.read(16 * n_chunks))
-                    ]
+                    chunks: Tuple[Tuple[int, int], ...] = tuple(
+                        (i, j)
+                        for i, j in struct.iter_unpack("<QQ", f.read(16 * n_chunks))
+                    )
 
                     assert bin_key not in bins
                     bins[bin_key] = chunks
 
                 # parse the interval index
                 n_intervals = struct.unpack("<i", f.read(4))[0]
-                intervals = [
+                intervals: Tuple[int, ...] = tuple(
                     i[0] for i in struct.iter_unpack("<Q", f.read(8 * n_intervals))
-                ]
+                )
 
                 if name in indexes:
                     raise RuntimeError(f"duplicate sequence name {name}")
@@ -138,7 +145,7 @@ class TabixIndex:
         )
 
     def __repr__(self) -> str:
-        return f"TabixIndex({self.file_format}, {self.column_sequence}, {self.column_begin}, {self.column_end}, {self.meta}, {self.headerlines_count}, {self.indexes})"
+        return f"{self.__class__.__name__}({self.file_format}, {self.column_sequence}, {self.column_begin}, {self.column_end}, {self.meta}, {self.headerlines_count}, {self.indexes})"
 
     def _lookup_linear(self, sequence_name: str, start: int) -> Union[None, int]:
         """
@@ -206,10 +213,11 @@ class TabixIndex:
 
         # either both or neither must be set
         assert (virtual_start is None) == (virtual_end is None)
+        assert (virtual_start is not None) == (virtual_end is not None)
 
-        return virtual_start, virtual_end
+        return virtual_start, virtual_end  # type: ignore
 
-    def write_to(self, outfile):
+    def write_to(self, outfile: RawIOBase) -> None:
         # header
         outfile.write(
             struct.pack(
@@ -255,7 +263,7 @@ class TabixIndex:
                 outfile.write(struct.pack("<Q", ioff))
 
     @classmethod
-    def build_from(cls, rawfile) -> "TabixIndex":
+    def build_from(cls, rawfile: RawIOBase) -> Self:
         """
         read a vcf file in blockgzip format and create an index object for it
         """
@@ -269,7 +277,7 @@ class TabixIndex:
         # dictionary of names to (bin_index, interval_index)
         # bin_index is a dictionary of bin numbers to [(chunk_start, chunk_end),...]
         # interval_index is a list of 16kbase interval start locations
-        indexes = {}
+        indexes: Dict[str, Tuple[Dict[int, List[Tuple[int, int]]], List[int]]] = {}
 
         # go through each line in turn
         # parse it into a structured object
@@ -278,7 +286,7 @@ class TabixIndex:
 
         # these are the internal two index types
         bin_index = {}
-        interval_index = []
+        interval_index: List[int] = []
 
         bgzipped = BlockGZipReader(rawfile)
         bgzipped.seek(0)
@@ -290,8 +298,8 @@ class TabixIndex:
             end_offset,
             line,
         ) in bgzipped.generate_lines_offset():
-            line = line.decode() + "\n"
-            vcf_fsm.run(line, LINE_START, accumulator)
+            line_str = line.decode() + "\n"
+            vcf_fsm.run(line_str, LINE_START, accumulator)
             vcf_line = accumulator.to_vcfline()
             accumulator.reset()
             # TODO add better debugging for unexpected lines
@@ -302,7 +310,9 @@ class TabixIndex:
 
             # have we started a new chromosome?
             if vcf_line.chrom not in indexes:
-                indexes[vcf_line.chrom] = ({}, [])
+                chrom_bin_index: Dict[int, List[Tuple[int, int]]] = {}
+                chrom_interval_index: List[int] = []
+                indexes[vcf_line.chrom] = (chrom_bin_index, chrom_interval_index)
                 bin_index = indexes[vcf_line.chrom][0]
                 interval_index = indexes[vcf_line.chrom][1]
 
@@ -346,8 +356,27 @@ class TabixIndex:
                 while len(interval_index) <= interval_i:
                     interval_index.append(start_virtual)
 
+        # now they have been built, freeze into immutability
+        # turn Dict[str, Tuple[Dict[int, List[ Tuple[int, int]]]     , List[int]]]
+        # into Dict[str, Tuple[Dict[int, Tuple[Tuple[int, int], ...]], Tuple[int, ...]]]
+        indexes_frozen: Dict[
+            str, Tuple[Dict[int, Tuple[Tuple[int, int], ...]], Tuple[int, ...]]
+        ] = {}
+        for chrom in indexes:
+            bin_index_frozen: Dict[int, Tuple[Tuple[int, int], ...]] = {}
+            for i in indexes[chrom][0]:
+                bin_index_frozen[i] = tuple(indexes[chrom][0][i])
+            interval_index_frozen = tuple(indexes[chrom][1])
+            indexes_frozen[chrom] = (bin_index_frozen, interval_index_frozen)
+
         return cls(
-            file_format, column_sequence, column_begin, column_end, meta, 0, indexes
+            file_format,
+            column_sequence,
+            column_begin,
+            column_end,
+            meta,
+            0,
+            indexes_frozen,
         )
 
     @staticmethod
@@ -396,8 +425,8 @@ class TabixIndex:
     def bin_start(k: int) -> int:
         # bit_length-1 is int log2
         lvl = (((7 * k) + 1).bit_length() - 1) // 3
-        ol = ((2 ** (3 * lvl)) - 1) // 7
-        sl = 2 ** (29 - (3 * lvl))
+        ol: int = ((2 ** (3 * lvl)) - 1) // 7
+        sl: int = 2 ** (29 - (3 * lvl))
         start = (k - ol) * sl
         return start
 
@@ -405,22 +434,22 @@ class TabixIndex:
     def bin_size(k: int) -> int:
         # bit_length-1 is int log2
         lvl = (((7 * k) + 1).bit_length() - 1) // 3
-        sl = 2 ** (29 - (3 * lvl))
+        sl: int = 2 ** (29 - (3 * lvl))
         return sl
 
 
 class TabixIndexedFile:
-    def __init__(self, fileobj, index: TabixIndex):
+    def __init__(self, fileobj: RawIOBase, index: TabixIndex):
         self.index = index
         self.bgzipped = BlockGZipReader(fileobj)
 
     @classmethod
-    def from_files(cls, fileobj, index_fileobj):
+    def from_files(cls, fileobj: RawIOBase, index_fileobj: RawIOBase) -> Self:
         return cls(fileobj, TabixIndex.from_file(index_fileobj))
 
     def fetch_bytes_block_offset(
         self, block_start: int, offset_start: int, block_end: int, offset_end: int
-    ):
+    ) -> bytes:
         value = b""
         self.bgzipped.seek(block_start)
         block = block_start
@@ -442,7 +471,7 @@ class TabixIndexedFile:
             block = self.bgzipped.tell()
         return value
 
-    def fetch_bytes_virtual(self, virtual_start: int, virtual_end: int):
+    def fetch_bytes_virtual(self, virtual_start: int, virtual_end: int) -> bytes:
         # the lower 16 bits store the offset of the byte inside the gzip block
         # the rest store the offset of gzip block
         block_start = virtual_start >> 16
@@ -494,7 +523,7 @@ class TabixIndexedFile:
             return ("" for _ in [])
 
         # turn the bytes into a list of strings
-        lines = region.decode("utf-8").splitlines()
+        lines: Iterable[str] = region.decode("utf-8").splitlines()
 
         # filter out comments
         lines = (line for line in lines if not line.startswith(self.index.meta))
@@ -537,7 +566,7 @@ class TabixIndexedVCFFile(TabixIndexedFile):
     accumulator: VCFAccumulator
     vcf_fsm: FSMachine
 
-    def __init__(self, fileobj, index):
+    def __init__(self, fileobj: RawIOBase, index: TabixIndex):
         super().__init__(fileobj, index)
         self.vcf_fsm = get_vcf_fsm()
         self.accumulator = VCFAccumulator()
