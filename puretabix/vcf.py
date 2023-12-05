@@ -156,6 +156,8 @@ class VCFLine:
                             f"{key}={','.join(value)}" if value else key
                             for key, value in self.info.items()
                         )
+                        if self.info
+                        else "."
                     ),
                 )
             )
