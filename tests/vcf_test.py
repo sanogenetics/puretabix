@@ -46,6 +46,26 @@ class TestVCFLineConstructors:
             == "VCFLine('','','',{},'chr1',123,('rs1',),'A',('C',),'.',('PASS',),{'foo': 'bar'},({'GT': '1/1'}, {'GT': '1/1'}))"
         )
 
+    def test_data_empty_info(self):
+        line = VCFLine.as_data(
+            "chr1",
+            123,
+            ["rs1"],
+            "A",
+            ["C"],
+            ".",
+            ["PASS"],
+            {},
+            [{"GT": "1/1"}, {"GT": "1/1"}],
+        )
+        linestr = str(line)
+        assert linestr == "chr1\t123\trs1\tA\tC\t.\tPASS\t.\tGT\t1/1\t1/1"
+        linerepr = repr(line)
+        assert (
+            linerepr
+            == "VCFLine('','','',{},'chr1',123,('rs1',),'A',('C',),'.',('PASS',),{},({'GT': '1/1'}, {'GT': '1/1'}))"
+        )
+
 
 class TestVCFFSM:
     def test_dbsnp(self, vcf_gz):
